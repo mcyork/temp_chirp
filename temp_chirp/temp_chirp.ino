@@ -1,9 +1,13 @@
 /*
- * Column Temperature Monitor - Firmware v2.0 (Production)
+ * Column Temperature Monitor - Firmware v2.1
  * Hardware: ESP32-S3-MINI-1
  * 
  * Changelog:
- * - v2.0: Added Persistence (Preferences), Fixed Display Overflow, Validated Pins
+ * - v2.1: Swapped SPI pins to 16/17/18 (Safer than 35-37).
+ *         Added Persistent Storage (Preferences).
+ *         Fixed Display Overflow/Edge cases.
+ *         Removed unused variables.
+ *         Added explicit SPI.begin() for completeness.
  */
 
  #include <SPI.h>
@@ -11,35 +15,34 @@
  #include <LedControl.h>        // Library: "LedControl" by Eberhard Fahle
  #include <Preferences.h>       // Native ESP32 Library for saving settings
  
- // --- PIN DEFINITIONS (Matched to v1.0 Spec) ---
- // Note: We use Software SPI (Bit-Banging) because LedControl 
- // requires it. This allows us to share pins 35/36/37 easily.
- 
+ // --- PIN DEFINITIONS (Production Safe) ---
  // User Inputs
  const int PIN_BTN_MODE = 5;
  const int PIN_BTN_UP   = 6;
  const int PIN_BTN_DOWN = 7;
  const int PIN_BUZZER   = 4;
  
- // Shared SPI Bus (Software SPI)
- const int PIN_SPI_MOSI = 35; 
- const int PIN_SPI_MISO = 37; 
- const int PIN_SPI_SCK  = 36; 
+ // SPI Bus (Software SPI / Bit-Bang)
+ // Swapped to Safe GPIOs (Avoids Strapping/Flash pins)
+ const int PIN_SPI_SCK  = 16; 
+ const int PIN_SPI_MOSI = 17; 
+ const int PIN_SPI_MISO = 18; 
  
  // Chip Selects
  const int PIN_CS_RTD   = 10;
  const int PIN_CS_DISP  = 11;
  
  // --- CONSTANTS ---
- const float R_REF     = 430.0; // Value of Reference Resistor on PCB (430 ohm)
+ const float R_REF     = 430.0; // Value of Reference Resistor on PCB
  const float R_NOMINAL = 100.0; // PT100 Nominal
  const float TEMP_MAX  = 999.0; // Display cap
  
  // --- OBJECTS ---
- // 1. RTD Sensor: Initialized with 4 pins = Software SPI
+ // 1. RTD Sensor: Software SPI Constructor
  Adafruit_MAX31865 thermo = Adafruit_MAX31865(PIN_CS_RTD, PIN_SPI_MOSI, PIN_SPI_MISO, PIN_SPI_SCK);
  
- // 2. Display: Data(MOSI), Clk(SCK), Load(CS) = Software SPI
+ // 2. Display: Software SPI Constructor
+ // Note: LedControl does not use MISO, so we don't pass it.
  LedControl lc = LedControl(PIN_SPI_MOSI, PIN_SPI_SCK, PIN_CS_DISP, 1);
  
  // 3. Preferences (Non-volatile storage)
@@ -49,7 +52,7 @@
  enum SystemMode { MODE_RUN, MODE_SET_THRESH, MODE_SET_STEP };
  SystemMode currentMode = MODE_RUN;
  
- float configThreshold = 170.0; // Default (will be overwritten by storage)
+ float configThreshold = 170.0; // Default (overwritten by storage)
  float configStepSize  = 0.5;   // Default
  float currentTempF    = 0.0;
  int   lastBandIndex   = -1;
@@ -64,23 +67,27 @@
  void setup() {
    Serial.begin(115200);
  
-   // 1. Load Settings from Flash
+   // 1. Initialize SPI (Best Practice)
+   // Even though we use SW SPI, this ensures global states are clean.
+   SPI.begin(); 
+ 
+   // 2. Load Settings from Flash
    preferences.begin("col-mon", false); // Namespace "col-mon", Read/Write
    configThreshold = preferences.getFloat("thresh", 170.0);
    configStepSize  = preferences.getFloat("step", 0.5);
  
-   // 2. Init Pins
+   // 3. Init Pins
    pinMode(PIN_BTN_MODE, INPUT_PULLUP); 
    pinMode(PIN_BTN_UP,   INPUT_PULLUP);
    pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
    pinMode(PIN_BUZZER,   OUTPUT);
  
-   // 3. Init Display
+   // 4. Init Display
    lc.shutdown(0, false); // Wake up
    lc.setIntensity(0, 8); // Brightness 0-15
    lc.clearDisplay(0);
  
-   // 4. Init RTD
+   // 5. Init RTD
    thermo.begin(MAX31865_3WIRE); 
  
    // Startup Chirp
@@ -95,8 +102,7 @@
    // Check for hardware faults (Cable cut, etc)
    if(thermo.readFault()) {
      thermo.clearFault();
-     // In production, you might display "Err", 
-     // but for now we just hold the last valid temp.
+     // In production, we just hold the last valid temp or ignore
    } else {
      float rawF = (tempC * 9.0 / 5.0) + 32.0;
      
@@ -232,12 +238,12 @@
  // --- DISPLAY HELPERS ---
  
  void displayFloat(float val) {
-   // Safety Cap
-   if (val > TEMP_MAX) val = TEMP_MAX;
-   
-   // Handle Negatives (Basic)
+   // 1. Handle Negative Values
    bool isNegative = (val < 0);
    if (isNegative) val = -val;
+ 
+   // 2. Safety Cap for Display (Prevent overflow)
+   if (val > TEMP_MAX) val = TEMP_MAX;
  
    int valToDisplay = (int)(val * 10); // 170.5 -> 1705
    
@@ -251,9 +257,9 @@
    lc.setDigit(0, 1, d2, true);      // Ones + Decimal Point
    lc.setDigit(0, 2, d3, false);     // Tens
    
-   // Hundreds digit handling
+   // 3. Hundreds / Sign Handling
    if (isNegative) {
-      lc.setChar(0, 3, '-', false); // Show minus sign
+      lc.setChar(0, 3, '-', false); // Show minus sign for digit 4
    } else {
       if (d4 == 0) lc.setChar(0, 3, ' ', false); // Blank leading zero
       else lc.setDigit(0, 3, d4, false);
