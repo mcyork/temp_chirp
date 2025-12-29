@@ -131,10 +131,73 @@ This document defines the electrical architecture for the Column Temperature Mon
     *   **Top:** Screw Terminal & Analog RTD Section (Keep isolated).
     *   **Center:** Display & User Buttons.
     *   **Bottom:** MCU, USB, and Power Regulation.
-2.  **Analog Isolation:** Place the 430Ω reference resistor and C_bypass **immediately** next to the MAX31865 pins. Keep digital traces away from the RTD input lines.
-3.  **USB Data:** Route D+ and D- as a differential pair (keep them parallel and equal length).
-4.  **Thermal:** The ESP32-S3-MINI has a ground pad underneath. Ensure this is soldered to the ground plane with multiple vias for heat dissipation.
-5.  **Test Points:** Add copper test pads on the bottom layer for: `3V3`, `GND`, `RX`, `TX`, `GPIO0`.
+
+2.  **Critical Capacitor Placement (CRITICAL FOR PERFORMANCE):**
+    
+    **LDO Regulator (U2 - ME6211C33M5G-N):**
+    *   **C1 (10uF):** Place **immediately adjacent** to U2 Pin 1 (VIN). Connect directly between VIN and GND with shortest possible traces. This is the input bulk capacitor.
+    *   **C2 (22uF):** Place **immediately adjacent** to U2 Pin 5 (VOUT). Connect directly between VOUT and GND with shortest possible traces. This is the output bulk capacitor.
+    *   **C3 (0.1uF):** Place **immediately adjacent** to U2 Pin 5 (VOUT), right next to C2. Connect directly between VOUT and GND. This provides high-frequency decoupling.
+    *   **Why critical:** LDO regulators require low-ESR capacitors close to the pins to maintain stability and reduce noise. Long traces can cause oscillation or poor regulation.
+
+    **ESP32 Module (U1 - ESP32-S3-MINI-1-N8):**
+    *   **C4, C5, C6 (0.1uF each):** Place **as close as possible** to U1 VCC pins. Distribute them around the module if multiple VCC pins exist. Connect directly between VCC and GND with shortest traces.
+    *   **Why critical:** ESP32 has high current transients during Wi-Fi/BLE operation. Multiple decoupling capacitors reduce power supply noise and prevent voltage droop.
+
+    **MAX31865 RTD Converter (U3):**
+    *   **C7 (0.1uF):** Place **immediately adjacent** to U3 Pin 20 (VDD). Connect directly between VDD and GND with shortest possible traces. Keep away from analog input pins (RTDIN+, RTDIN-).
+    *   **Why critical:** Analog circuits are sensitive to power supply noise. Poor decoupling can cause measurement errors.
+
+    **MAX7219 Display Driver (U4):**
+    *   **C8 (0.1uF):** Place **immediately adjacent** to U4 Pin 19 (V+). Connect directly between V+ and GND with shortest possible traces.
+    *   **Why critical:** Display drivers have high current transients when updating segments. Decoupling prevents voltage spikes and display flicker.
+
+    **General Rules:**
+    *   **Keep traces short:** Decoupling capacitors should be within 2-3mm of the IC power pins.
+    *   **Use vias carefully:** If capacitors are on opposite side, use multiple vias for low impedance.
+    *   **Ground plane:** Ensure solid ground plane under capacitors for best performance.
+    *   **Analog vs Digital:** Keep C7 (MAX31865) away from digital switching noise sources.
+
+3.  **Critical Resistor Placement:**
+
+    **USB Connector (J1):**
+    *   **R1, R2 (5.1kΩ):** Place **close to J1** USB connector, near CC1 and CC2 pins. These are USB Type-C configuration resistors and should be within 5mm of the connector.
+    *   **Why critical:** USB-C specification requires these resistors to be close to the connector for proper power negotiation and device detection.
+
+    **ESP32 Module (U1):**
+    *   **R3 (10kΩ):** Place **close to U1 EN pin** and SW1 reset switch. This pull-up resistor keeps EN high during normal operation.
+    *   **Why critical:** Long traces on EN pin can pick up noise and cause unwanted resets. Keep resistor and switch close together.
+
+    **MAX31865 RTD Converter (U3) - CRITICAL:**
+    *   **R4 (430Ω, 0.1% tolerance):** Place **immediately adjacent** to U3, between Pin 1 (BIAS) and Pin 2 (REFIN+). This is the most critical placement in the entire design.
+    *   **Why critical:** 
+        *   This resistor is the reference for all RTD temperature measurements. Any trace resistance or noise pickup will cause measurement errors.
+        *   Must be 0.1% tolerance - this is the accuracy bottleneck for the entire temperature measurement system.
+        *   Keep traces as short as possible (ideally <5mm total trace length).
+        *   Keep away from digital signals, power supply switching, and high-frequency traces.
+        *   Consider placing on the same side as U3 to avoid vias if possible.
+
+    **MAX7219 Display Driver (U4):**
+    *   **R5 (10kΩ):** Place **close to U4 Pin 18 (ISET)**. This resistor sets the LED current. Can be within 10mm if needed for routing.
+    *   **Why critical:** Determines display brightness. Longer traces are acceptable but keep away from noisy digital signals.
+
+    **MOSFET/Buzzer Circuit (Q1):**
+    *   **R6 (1kΩ):** Place **close to Q1 Gate pin** (Pin 1). Can be near ESP32 IO4 or near MOSFET, whichever is more convenient for routing.
+    *   **Why critical:** Gate resistor prevents ringing and reduces EMI. Should be within 10mm of MOSFET gate pin.
+
+    **General Rules:**
+    *   **R4 is most critical:** This 430Ω resistor placement is the single most important placement decision for temperature accuracy.
+    *   **Trace length matters:** For R4, minimize total trace length (BIAS → R4 → REFIN+).
+    *   **Analog isolation:** Keep R4 and RTD signal traces away from digital switching noise (SPI, USB, display updates).
+    *   **Other resistors:** R1, R2, R3, R5, R6 can tolerate longer traces (10-20mm) but shorter is always better.
+
+4.  **Analog Isolation:** Place the 430Ω reference resistor (R4) and C7 **immediately** next to the MAX31865 pins. Keep digital traces away from the RTD input lines (RTDIN+, RTDIN-). Route RTD signals as far as possible from SPI, USB, and other digital signals.
+
+5.  **USB Data:** Route D+ and D- as a differential pair (keep them parallel and equal length). Maintain 90Ω differential impedance if possible.
+
+6.  **Thermal:** The ESP32-S3-MINI has a ground pad underneath. Ensure this is soldered to the ground plane with multiple vias for heat dissipation.
+
+7.  **Test Points:** Add copper test pads on the bottom layer for: `3V3`, `GND`, `RX`, `TX`, `GPIO0`.
 
 ---
 *End of Specification*

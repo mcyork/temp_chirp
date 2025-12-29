@@ -165,6 +165,10 @@ IO43 Pin ──── UART_TX Net
 IO44 Pin ──── UART_RX Net
               │
               └─── Emergency Header Pin 4 (H1)
+
++3V3 Net ──── Emergency Header Pin 1 (H1)
+
+GND Net ──── Emergency Header Pin 2 (H1)
 ```
 
 **Connection breakdown:**
@@ -175,6 +179,11 @@ IO44 Pin ──── UART_RX Net
 - **IO20 (D+):** USB Data Positive - connects to USB connector DP1/DP2 pins - for USB communication
 - **IO43 (UART_TX):** UART Transmit - connects to emergency header pin 3 - for debugging/emergency access
 - **IO44 (UART_RX):** UART Receive - connects to emergency header pin 4 - for debugging/emergency access
+- **Emergency Header (H1):** 4-pin header for external UART connection
+  - Pin 1: +3V3 (provides power/reference for external devices)
+  - Pin 2: GND (common ground reference)
+  - Pin 3: UART_TX (transmit from ESP32)
+  - Pin 4: UART_RX (receive to ESP32)
 
 ---
 
@@ -262,12 +271,13 @@ Screw Terminal Pin 3 ──── RTDIN- Pin (FORCE-)
 
 ```
 MAX7219 (U4) Physical Pins:
-├─ DIN Pin ────────────────────────┐
-├─ CLK Pin ───────────────────────┤
-├─ LOAD Pin ───────────────────────┤
-├─ VCC Pin ────────────────────────┤
-├─ GND Pin ────────────────────────┤
-└─ ISET Pin ───────────────────────┘
+├─ DIN Pin (Pin 1) ────────────────────────┐
+├─ CLK Pin (Pin 13) ───────────────────────┤
+├─ LOAD Pin (Pin 12) ───────────────────────┤
+├─ VCC Pin (Pin 19 - V+) ────────────────────────┤
+├─ GND Pin (Pin 4, 9) ────────────────────────┤
+├─ ISET Pin (Pin 18) ───────────────────────┘
+└─ DOUT Pin (Pin 24) ──────────────────────── (Not used - no MISO needed)
 
 MOSI Net ──── DIN Pin (Data In)
 SCK Net ──── CLK Pin (Clock)

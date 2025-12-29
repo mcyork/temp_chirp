@@ -34,9 +34,9 @@ The RTD (Resistance Temperature Detector) probe has **3 wires** that connect to 
 - Your current netlist shows R4 between Pin 1 and Pin 5, which is incorrect
 
 **Screw Terminal J2:**
-- Pin 1 → **EMPTY** (should connect to `$1N4176` net)
-- Pin 2 → **EMPTY** (should connect to `$1N4181` net)
-- Pin 3 → **EMPTY** (should connect to `RTDIN-` net)
+- Pin 1 → **EMPTY** (should connect to **MAX31865 Pin 7** - RTDIN+)
+- Pin 2 → **EMPTY** (should connect to **MAX31865 Pin 8** - RTDIN-)  
+- Pin 3 → **EMPTY** (should connect to **GND**)
 
 ---
 
@@ -160,26 +160,33 @@ In your schematic tool:
 - R4 Pin 1 → Pin 1 (BIAS) ✅
 - R4 Pin 2 → Pin 2 (REFIN+) ✅
 
-### Then Connect J2:
+### Then Connect J2 - Direct Pin Connections:
 
-1. **J2 Pin 1** → Connect to **MAX31865 Pin 7 (RTDIN+)**
-   - Create net `RTDIN+` if it doesn't exist
+1. **J2 Pin 1** → **MAX31865 Pin 7** (RTDIN+)
+   - Just connect these two pins together
 
-2. **J2 Pin 2** → Connect to **MAX31865 Pin 8 (RTDIN-)**
-   - Net `RTDIN-` already exists ✅
+2. **J2 Pin 2** → **MAX31865 Pin 8** (RTDIN-)
+   - Just connect these two pins together
 
-3. **J2 Pin 3** → Connect to **GND net**
-   - GND net already exists ✅
+3. **J2 Pin 3** → **GND**
+   - Connect to any GND net/pin
 
 ---
 
-## Summary
+## Summary - Direct Pin Connections
 
-**Correct MAX31865 Connections:**
-- Pin 1 (BIAS) ←→ R4 ←→ Pin 2 (REFIN+) ✅
-- Pin 7 (RTDIN+) ←→ J2 Pin 1
-- Pin 8 (RTDIN-) ←→ J2 Pin 2 ✅
-- J2 Pin 3 ←→ GND
+**J2 Screw Terminal Connections (Simple Version):**
+```
+J2 Pin 1  →  MAX31865 Pin 7  (RTDIN+)
+J2 Pin 2  →  MAX31865 Pin 8  (RTDIN-)
+J2 Pin 3  →  GND
+```
 
-**Your current netlist shows R4 connected incorrectly.** Pin 1 is BIAS (correct), but Pin 2 should be REFIN+, not Pin 5. Pin 7 should be RTDIN+, not Pin 5.
+**R4 Resistor Connection:**
+```
+R4 Pin 1  →  MAX31865 Pin 1  (BIAS)
+R4 Pin 2  →  MAX31865 Pin 2  (REFIN+)
+```
+
+**Don't worry about net names** - just connect the pins directly as shown above!
 

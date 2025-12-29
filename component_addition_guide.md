@@ -86,7 +86,12 @@ This guide provides step-by-step instructions for adding all components to the s
 - **Add Component:** H1
 - **Type:** Pin Header, 1x4
 - **Package:** 2.54mm Pitch
-- **Application:** Emergency UART Port (RX/TX)
+- **Application:** Emergency UART Port
+- **Pin Connections:**
+  - Pin 1 → +3V3 net (for external device power/reference)
+  - Pin 2 → GND net (common ground reference)
+  - Pin 3 → UART_TX net (ESP32 IO43)
+  - Pin 4 → UART_RX net (ESP32 IO44)
 - **Section:** Microcontroller
 
 ---
