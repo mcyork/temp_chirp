@@ -1,5 +1,5 @@
 /*
- * NTP Clock - Firmware v2.0
+ * NTP Clock - Firmware v2.00
  * Hardware: ESP32-S3-MINI-1
  * 
  * Features:
@@ -7,13 +7,17 @@
  * - Displays time as HHMM on 7-segment display
  * - Decimal point on 100s digit flashes like a colon (seconds indicator)
  * - AP mode web interface for WiFi and preferences configuration
- * - Timezone configuration via Preferences
+ * - Timezone configuration via Preferences with automatic DST handling
+ * - Version display at boot
+ * - IP address scrolling in AP mode
  * 
  * Configuration:
  * - WiFi credentials configured via AP mode web interface (192.168.4.1)
  * - Timezone configured via web interface or buttons
  * - No default WiFi credentials - must be configured
  */
+
+#define FIRMWARE_VERSION "2.00"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -48,47 +52,145 @@ int   daylightOffset_sec = 3600;  // Default 1 hour for DST
 class SimpleMAX7219 {
 private:
   int csPin;
+  uint8_t decodeMask = 0x00;  // bit0=digit0 ... bit7=digit7
+
   void writeRegister(uint8_t address, uint8_t value) {
-    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0)); 
+    SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
     digitalWrite(csPin, LOW);
     SPI.transfer(address);
     SPI.transfer(value);
     digitalWrite(csPin, HIGH);
     SPI.endTransaction();
   }
-  
+
+  // MAX7219 no-decode mapping: bit0=A, bit1=B, bit2=C, bit3=D, bit4=E, bit5=F, bit6=G, bit7=DP
+  uint8_t raw7seg(char c) {
+    switch (c) {
+      // digits
+      case '0': return 0x3F; // A B C D E F
+      case '1': return 0x06; // B C
+      case '2': return 0x5B; // A B D E G
+      case '3': return 0x4F; // A B C D G
+      case '4': return 0x66; // B C F G
+      case '5': return 0x6D; // A C D F G
+      case '6': return 0x7D; // A C D E F G
+      case '7': return 0x07; // A B C
+      case '8': return 0x7F; // A B C D E F G
+      case '9': return 0x6F; // A B C D F G
+
+      // letters (approx)
+      case 'A': case 'a': return 0x77; // A B C E F G
+      case 'C': case 'c': return 0x39; // A D E F
+      case 'o':           return 0x5C; // C D E G
+      case 'n':           return 0x54; // C E G (approx)
+      case 'r':           return 0x50; // E G
+      case 'E':           return 0x79; // A D E F G
+      case 'P':           return 0x73; // A B E F G
+      case 'H':           return 0x76; // B C E F G
+      case 'L':           return 0x38; // D E F
+      case '-':           return 0x40; // G
+
+      case ' ':           return 0x00;
+      case '.':           return 0x80; // DP only
+      default:            return 0x00;
+    }
+  }
+
+  bool isCodeBCompatible(char value) {
+    return (value >= '0' && value <= '9') ||
+           value == '-' || value == 'E' || value == 'H' ||
+           value == 'L' || value == 'P' || value == ' ';
+  }
+
+  bool decodeEnabledForDigit(int digit) const {
+    return (decodeMask & (1 << digit)) != 0;
+  }
+
 public:
   SimpleMAX7219(int cs) : csPin(cs) {}
-  
+
+  void setDecodeMode(uint8_t mask) {
+    decodeMask = mask;
+    writeRegister(0x09, decodeMask);
+  }
+
   void begin() {
     pinMode(csPin, OUTPUT);
-    digitalWrite(csPin, HIGH); 
-    writeRegister(0x0C, 0x01); // Shutdown: normal
-    writeRegister(0x0B, 0x03); // Scan limit: 4 digits
-    writeRegister(0x09, 0xFF); // Decode mode: Code B
-    writeRegister(0x0A, 0x08); // Intensity: medium
+    digitalWrite(csPin, HIGH);
+    delay(50);
+
+    writeRegister(0x0C, 0x01); // normal operation
+    delay(10);
+    writeRegister(0x0B, 0x03); // scan limit: digits 0..3
+    delay(10);
+
+    // Default: decode ON for digits 0..3 (time/version)
+    setDecodeMode(0x0F);
+    delay(10);
+
+    writeRegister(0x0A, 0x08); // intensity
+    delay(10);
+
     clearDisplay(0);
+    delay(20);
   }
-  
+
   void clearDisplay(int device) {
-    for (int i = 1; i <= 8; i++) writeRegister(i, 0x0F);
+    for (int i = 1; i <= 8; i++) {
+      // If decode is enabled for that digit, blank=0x0F; else blank=0x00
+      int digit = i - 1;
+      writeRegister(i, decodeEnabledForDigit(digit) ? 0x0F : 0x00);
+    }
   }
-  
+
   void setDigit(int device, int digit, int value, bool dp) {
     if (digit < 0 || digit > 7) return;
-    uint8_t code = value & 0x0F;
-    if (dp) code |= 0x80;
-    writeRegister(digit + 1, code);
+
+    if (decodeEnabledForDigit(digit)) {
+      uint8_t code = (uint8_t)(value & 0x0F);
+      if (dp) code |= 0x80;
+      writeRegister(digit + 1, code);
+    } else {
+      // raw digit
+      char c = (char)('0' + (value % 10));
+      uint8_t seg = raw7seg(c);
+      if (dp) seg |= 0x80;
+      writeRegister(digit + 1, seg);
+    }
   }
-  
+
   void setChar(int device, int digit, char value, bool dp) {
     if (digit < 0 || digit > 7) return;
-    uint8_t code = 0x0F; // Blank
-    if (value == '-') code = 0x0A;
-    else if (value == 'E') code = 0x0B;
-    else if (value >= '0' && value <= '9') code = value - '0';
-    if (dp) code |= 0x80;
-    writeRegister(digit + 1, code);
+
+    if (decodeEnabledForDigit(digit) && isCodeBCompatible(value)) {
+      uint8_t code = 0x0F;
+      if (value >= '0' && value <= '9') code = value - '0';
+      else if (value == '-') code = 0x0A;
+      else if (value == 'E') code = 0x0B;
+      else if (value == 'H') code = 0x0C;
+      else if (value == 'L') code = 0x0D;
+      else if (value == 'P') code = 0x0E;
+      else if (value == ' ') code = 0x0F;
+
+      if (dp) code |= 0x80;
+      writeRegister(digit + 1, code);
+    } else {
+      uint8_t seg = raw7seg(value);
+      if (dp) seg |= 0x80;
+      writeRegister(digit + 1, seg);
+    }
+  }
+  
+  void displayString(int device, const char* str, int startPos) {
+    // Display up to 4 characters starting at startPos
+    for (int i = 0; i < 4; i++) {
+      int pos = startPos + i;
+      if (pos >= 0 && pos < strlen(str)) {
+        setChar(device, 3 - i, str[pos], false);
+      } else {
+        setChar(device, 3 - i, ' ', false);
+      }
+    }
   }
   
   void setIntensity(int device, int intensity) {
@@ -110,6 +212,8 @@ bool apMode = false;
 unsigned long lastTimeUpdate = 0;
 int displayBrightness = 8; // 0-15, default medium
 bool use24Hour = true; // 24-hour format (true) or 12-hour format (false)
+bool showIPAddress = false; // Flag to show IP address twice after WiFi connects
+int ipDisplayCount = 0; // Count how many times IP has been displayed
 
 // Button state tracking
 unsigned long lastButtonPress = 0;
@@ -141,8 +245,9 @@ void setup() {
   
   // Init Display
   lc.begin();
+  delay(200); // Give display time to initialize
   
-  // Load saved preferences
+  // Load saved preferences FIRST so brightness is set before version display
   preferences.begin("ntp_clock", false);
   displayBrightness = preferences.getInt("brightness", 8);
   use24Hour = preferences.getBool("24hour", true);
@@ -150,22 +255,30 @@ void setup() {
   daylightOffset_sec = preferences.getInt("dst_offset", 3600);
   preferences.end();
   
-  // Set initial brightness
+  // Set initial brightness BEFORE showing version
   lc.setIntensity(0, displayBrightness);
   
-  // Display "8888" test
-  lc.setDigit(0, 3, 8, false);
-  lc.setDigit(0, 2, 8, false);
-  lc.setDigit(0, 1, 8, false);
-  lc.setDigit(0, 0, 8, false);
-  delay(500);
+  // Force clear display multiple times to remove any initialization artifacts
   lc.clearDisplay(0);
+  delay(100);
+  lc.clearDisplay(0);
+  delay(100);
+  
+  // Display version at boot (e.g., "2.00") - ALWAYS show regardless of preferences
+  // MAX7219 digit order: digit 0 = rightmost, digit 3 = leftmost
+  // Display as "2.00" (left to right: 2, dot, 0, 0)
+  lc.setDecodeMode(0x0F);  // digits use decode for version
+  lc.setDigit(0, 3, 2, false);   // Leftmost: 2
+  lc.setDigit(0, 2, 0, true);    // Second: 0 with decimal point
+  lc.setDigit(0, 1, 0, false);   // Third: 0
+  lc.setDigit(0, 0, 0, false);   // Rightmost: 0
+  delay(5000); // Block for 5 seconds to show version
   
   // Startup beep
   tone(PIN_BUZZER, 2000, 100);
   delay(150);
   
-  // Check for WiFi credentials
+  // NOW check for WiFi credentials (AFTER version display is complete)
   preferences.begin("wifi_config", false);
   String savedSSID = preferences.getString("ssid", "");
   String savedPassword = preferences.getString("password", "");
@@ -174,6 +287,7 @@ void setup() {
   if (savedSSID.length() == 0) {
     // No WiFi credentials - start AP mode
     apMode = true;
+    lc.setDecodeMode(0x00);   // raw segments on all digits for text
     lc.setChar(0, 0, 'A', false);
     lc.setChar(0, 1, 'P', false);
     lc.setChar(0, 2, ' ', false);
@@ -190,11 +304,12 @@ void setup() {
     
     tone(PIN_BUZZER, 1500, 200);
   } else {
-    // Try to connect to WiFi
+    // Try to connect to WiFi (AFTER version display is done)
     WiFi.mode(WIFI_STA);
     WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
     
     // Show "Conn" while connecting
+    lc.setDecodeMode(0x00);   // raw segments on all digits for text
     lc.setChar(0, 0, 'C', false);
     lc.setChar(0, 1, 'o', false);
     lc.setChar(0, 2, 'n', false);
@@ -210,6 +325,11 @@ void setup() {
       wifiConnected = true;
       tone(PIN_BUZZER, 3000, 100);
       
+      // Show IP address twice after connecting
+      showIPAddress = true;
+      ipDisplayCount = 0;
+      lastTimeUpdate = 0; // Reset time update to allow IP display first
+      
       // Configure NTP
       configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
       
@@ -222,8 +342,13 @@ void setup() {
         delay(100);
         tone(PIN_BUZZER, 3000, 50);
       }
+      
+      // Clear display before showing IP
+      lc.clearDisplay(0);
+      delay(500);
     } else {
       // WiFi failed - show error and enter AP mode
+      lc.setDecodeMode(0x00);   // raw segments on all digits for text
       lc.setChar(0, 0, 'E', false);
       lc.setChar(0, 1, 'r', false);
       lc.setChar(0, 2, 'r', false);
@@ -239,6 +364,7 @@ void setup() {
       server.on("/save", HTTP_POST, handleSave);
       server.begin();
       
+      lc.setDecodeMode(0x00);   // raw segments on all digits for text
       lc.setChar(0, 0, 'A', false);
       lc.setChar(0, 1, 'P', false);
       lc.setChar(0, 2, ' ', false);
@@ -246,10 +372,7 @@ void setup() {
     }
   }
   
-  delay(500);
-  if (!apMode) {
-    lc.clearDisplay(0);
-  }
+  // Don't clear display here - let loop() handle IP display or time display
 }
 
 void loop() {
@@ -260,67 +383,147 @@ void loop() {
     // Still handle buttons for brightness/time format
     handleButtons();
     
-    // Show "AP" on display
-    static unsigned long lastAPDisplay = 0;
-    if (millis() - lastAPDisplay >= 2000) {
-      lastAPDisplay = millis();
-      lc.setChar(0, 0, 'A', false);
-      lc.setChar(0, 1, 'P', false);
-      lc.setChar(0, 2, ' ', false);
-      lc.setChar(0, 3, ' ', false);
+    // Scroll IP address across display: "192.168.4.1"
+    static unsigned long lastScrollUpdate = 0;
+    static int scrollPosition = 0;
+    static bool decodeSetForIP = false;
+    const char* ipAddress = "192.168.4.1";
+    const int scrollDelay = 300; // milliseconds between scroll steps
+    
+    // Set decode mode to raw for IP scrolling (only once)
+    if (!decodeSetForIP) {
+      lc.setDecodeMode(0x00);   // raw segments on all digits for text/IP
+      decodeSetForIP = true;
+    }
+    
+    if (millis() - lastScrollUpdate >= scrollDelay) {
+      lastScrollUpdate = millis();
+      
+      // Display 4 characters starting at scrollPosition
+      for (int i = 0; i < 4; i++) {
+        int pos = scrollPosition + i;
+        if (pos >= 0 && pos < strlen(ipAddress)) {
+          lc.setChar(0, 3 - i, ipAddress[pos], false);
+        } else {
+          lc.setChar(0, 3 - i, ' ', false);
+        }
+      }
+      
+      scrollPosition++;
+      // Reset when we've scrolled past the end (add 4 spaces at end for smooth exit)
+      if (scrollPosition > strlen(ipAddress) + 3) {
+        scrollPosition = -3; // Start 3 positions before start for smooth entry
+      }
     }
   } else {
     // Normal operation mode
     handleButtons();
     
-    // Update time every second
-    if (millis() - lastTimeUpdate >= 1000) {
-      lastTimeUpdate = millis();
+    // Show IP address twice after WiFi connects (takes priority over time display)
+    if (showIPAddress && wifiConnected) {
+      static unsigned long lastIPScrollUpdate = 0;
+      static int ipScrollPosition = -3;
+      static bool decodeSetForIP = false;
+      IPAddress ip = WiFi.localIP();
+      char ipStr[16];
+      sprintf(ipStr, "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+      const int ipScrollDelay = 300; // milliseconds between scroll steps
       
-      if (wifiConnected && timeSynced) {
-        struct tm timeinfo;
-        if (getLocalTime(&timeinfo)) {
-          // Extract hours and minutes
-          int hours = timeinfo.tm_hour;
-          int minutes = timeinfo.tm_min;
-          int seconds = timeinfo.tm_sec;
-          
-          // Convert to 12-hour format if needed
-          if (!use24Hour) {
-            if (hours == 0) hours = 12;      // 12 AM
-            else if (hours > 12) hours -= 12; // 1 PM - 11 PM
-          }
-          
-          // Format as HHMM (4 digits)
-          int displayValue = (hours * 100) + minutes;
-          
-          // Extract digits
-          int d1 = displayValue % 10;           // Minutes ones (rightmost)
-          int d2 = (displayValue / 10) % 10;   // Minutes tens
-          int d3 = (displayValue / 100) % 10;  // Hours ones
-          int d4 = (displayValue / 1000) % 10; // Hours tens (leftmost)
-          
-          // Flash colon (decimal point on 100s digit) based on seconds
-          bool showColon = (seconds % 2 == 0);
-          
-          // Display time
-          lc.setDigit(0, 3, d1, false);  // Minutes ones (rightmost)
-          lc.setDigit(0, 2, d2, false);  // Minutes tens
-          lc.setDigit(0, 1, d3, showColon); // Hours ones + colon (decimal point)
-          
-          // In 12-hour mode, hide leading zero (show blank instead of "0")
-          if (!use24Hour && d4 == 0) {
-            lc.setChar(0, 0, ' ', false);  // Blank for leading zero in 12-hour mode
+      // Set decode mode to raw for IP scrolling (only once)
+      if (!decodeSetForIP) {
+        lc.setDecodeMode(0x00);   // raw segments on all digits for text/IP
+        decodeSetForIP = true;
+      }
+      
+      if (millis() - lastIPScrollUpdate >= ipScrollDelay) {
+        lastIPScrollUpdate = millis();
+        
+        // Display 4 characters starting at ipScrollPosition
+        for (int i = 0; i < 4; i++) {
+          int pos = ipScrollPosition + i;
+          if (pos >= 0 && pos < strlen(ipStr)) {
+            lc.setChar(0, 3 - i, ipStr[pos], false);
           } else {
-            lc.setDigit(0, 0, d4, false);  // Hours tens (leftmost)
+            lc.setChar(0, 3 - i, ' ', false);
           }
-        } else {
-          // Time sync lost - show error
-          lc.setChar(0, 0, 'E', false);
-          lc.setChar(0, 1, 'r', false);
-          lc.setChar(0, 2, 'r', false);
-          lc.setChar(0, 3, ' ', false);
-          timeSynced = false;
+        }
+        
+        ipScrollPosition++;
+        // When we've scrolled past the end
+        if (ipScrollPosition > strlen(ipStr) + 3) {
+          ipScrollPosition = -3; // Reset to start
+          ipDisplayCount++;
+          if (ipDisplayCount >= 2) {
+            // Shown twice, now stop and show time
+            showIPAddress = false;
+            ipScrollPosition = -3;
+            ipDisplayCount = 0;
+            decodeSetForIP = false; // Reset flag
+            lc.setDecodeMode(0x0F);   // decode digits 0..3 for time
+            lc.clearDisplay(0); // Clear before showing time
+            delay(500);
+          }
+        }
+      }
+      // Don't update time while showing IP
+      return;
+    }
+    
+    // Update time every second (only if not showing IP)
+    {
+      // Update time every second
+      if (millis() - lastTimeUpdate >= 1000) {
+        lastTimeUpdate = millis();
+        
+        // Ensure decode mode is set for time display (digits)
+        lc.setDecodeMode(0x0F);   // decode digits 0..3
+        
+        if (wifiConnected && timeSynced) {
+          struct tm timeinfo;
+          if (getLocalTime(&timeinfo)) {
+            // Extract hours and minutes
+            int hours = timeinfo.tm_hour;
+            int minutes = timeinfo.tm_min;
+            int seconds = timeinfo.tm_sec;
+            
+            // Convert to 12-hour format if needed
+            if (!use24Hour) {
+              if (hours == 0) hours = 12;      // 12 AM
+              else if (hours > 12) hours -= 12; // 1 PM - 11 PM
+            }
+            
+            // Format as HHMM (4 digits)
+            int displayValue = (hours * 100) + minutes;
+            
+            // Extract digits
+            int d1 = displayValue % 10;           // Minutes ones (rightmost)
+            int d2 = (displayValue / 10) % 10;   // Minutes tens
+            int d3 = (displayValue / 100) % 10;  // Hours ones
+            int d4 = (displayValue / 1000) % 10; // Hours tens (leftmost)
+            
+            // Flash colon (decimal point on 100s digit) based on seconds
+            bool showColon = (seconds % 2 == 0);
+            
+            // Display time
+            lc.setDigit(0, 3, d1, false);  // Minutes ones (rightmost)
+            lc.setDigit(0, 2, d2, false);  // Minutes tens
+            lc.setDigit(0, 1, d3, showColon); // Hours ones + colon (decimal point)
+            
+            // In 12-hour mode, hide leading zero (show blank instead of "0")
+            if (!use24Hour && d4 == 0) {
+              lc.setChar(0, 0, ' ', false);  // Blank for leading zero in 12-hour mode
+            } else {
+              lc.setDigit(0, 0, d4, false);  // Hours tens (leftmost)
+            }
+          } else {
+            // Time sync lost - show error
+            lc.setDecodeMode(0x00);   // raw segments on all digits for text
+            lc.setChar(0, 0, 'E', false);
+            lc.setChar(0, 1, 'r', false);
+            lc.setChar(0, 2, 'r', false);
+            lc.setChar(0, 3, ' ', false);
+            timeSynced = false;
+          }
         }
       }
     }

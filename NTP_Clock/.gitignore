@@ -25,5 +25,8 @@ Thumbs.db
 firmware/*.bin
 !firmware/.gitkeep
 
+# Allow firmware.bin in installer directory for GitHub Pages hosting
+!installer/firmware.bin
+
 # Logs
 *.log

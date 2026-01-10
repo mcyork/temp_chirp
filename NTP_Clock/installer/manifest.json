@@ -6,8 +6,8 @@
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "https://github.com/mcyork/ntp_clock/releases/latest/download/firmware.bin",
-          "offset": 0x10000
+          "path": "https://mcyork.github.io/ntp_clock/installer/firmware.bin",
+          "offset": 0
         }
       ]
     }

@@ -156,14 +156,10 @@
             <div class="form-group">
                 <label for="timezone">Timezone *</label>
                 <select id="timezone" required>
-                    <option value="-28800">Pacific Standard Time (PST) - UTC-8</option>
-                    <option value="-25200">Pacific Daylight Time (PDT) - UTC-7</option>
-                    <option value="-21600">Mountain Standard Time (MST) - UTC-7</option>
-                    <option value="-18000">Mountain Daylight Time (MDT) - UTC-6</option>
-                    <option value="-18000">Central Standard Time (CST) - UTC-6</option>
-                    <option value="-14400">Central Daylight Time (CDT) - UTC-5</option>
-                    <option value="-18000">Eastern Standard Time (EST) - UTC-5</option>
-                    <option value="-14400">Eastern Daylight Time (EDT) - UTC-4</option>
+                    <option value="-28800">Pacific Time (PT) - UTC-8 (PST/PDT with DST)</option>
+                    <option value="-21600">Mountain Time (MT) - UTC-7 (MST/MDT with DST)</option>
+                    <option value="-18000">Central Time (CT) - UTC-6 (CST/CDT with DST)</option>
+                    <option value="-18000">Eastern Time (ET) - UTC-5 (EST/EDT with DST)</option>
                     <option value="0">UTC (Coordinated Universal Time)</option>
                     <option value="3600">Central European Time (CET) - UTC+1</option>
                     <option value="7200">Central European Summer Time (CEST) - UTC+2</option>
@@ -176,7 +172,7 @@
                 <label for="daylight-offset">Daylight Saving Offset (seconds)</label>
                 <input type="text" id="daylight-offset" value="3600" placeholder="3600">
                 <small style="color: #666; font-size: 0.85em; display: block; margin-top: 5px;">
-                    Usually 3600 seconds (1 hour) for DST, or 0 if not applicable
+                    Set to 3600 (1 hour) for US timezones with DST. The firmware will automatically apply this offset during daylight saving periods. Set to 0 if your timezone doesn't observe DST.
                 </small>
             </div>
         </div>
@@ -239,6 +235,12 @@
         // Show instructions after successful install
         installButton.addEventListener('esp-web-install-button-install-success', () => {
             alert('Installation successful! The device will now start in AP mode. Connect to "NTP-Clock-AP" and configure WiFi at 192.168.4.1');
+        });
+        
+        // Handle manifest loading errors
+        installButton.addEventListener('esp-web-install-button-manifest-error', (e) => {
+            console.error('Manifest error:', e.detail);
+            alert('Failed to load firmware manifest. Please check:\n1. GitHub Pages is enabled\n2. The release exists at https://github.com/mcyork/ntp_clock/releases\n3. Your internet connection is working');
         });
     </script>
 </body>
