@@ -1,0 +1,15 @@
+{
+  "name": "NTP Clock Firmware",
+  "version": "1.0.0",
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "https://github.com/mcyork/ntp_clock/releases/latest/download/firmware.bin",
+          "offset": 0x10000
+        }
+      ]
+    }
+  ]
+}
