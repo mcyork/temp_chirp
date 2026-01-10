@@ -52,7 +52,7 @@
  */
 
 
- #define FIRMWARE_VERSION "2.13"
+ #define FIRMWARE_VERSION "2.14"
 
 #include <WiFi.h>
 #include <WebServer.h>
