@@ -12,10 +12,17 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: main  # Checkout main branch, not the tag
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
         
       - name: Set up Arduino CLI
         uses: arduino/setup-arduino-cli@v2
@@ -40,12 +47,19 @@ jobs:
           cp NTP_Clock.ino NTP_Clock/
           arduino-cli compile --fqbn esp32:esp32:esp32s3 NTP_Clock --build-path ./build
           
-      - name: Extract firmware binary
+      - name: Copy firmware to installer directory
         run: |
           mkdir -p installer
-          # Copy the merged binary (complete firmware image) to installer directory
           cp build/NTP_Clock.ino.merged.bin installer/firmware.bin
-          ls -lh installer/firmware.bin
+          ls -lh installer/
+          
+      - name: Commit firmware to repository
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add installer/firmware.bin
+          git diff --staged --quiet || git commit -m "Build firmware for ${{ github.ref_name }}"
+          git push origin main
           
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
@@ -53,22 +67,6 @@ jobs:
           name: firmware
           path: installer/firmware.bin
           retention-days: 30
-          
-      - name: Commit firmware to repository
-        if: github.ref_type == 'tag'
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
-          git add installer/firmware.bin
-          git commit -m "Update firmware binary for ${{ github.ref_name }}" || exit 0
-          git push origin HEAD:main
-          
-      - name: Debug tag info
-        run: |
-          echo "github.ref = ${{ github.ref }}"
-          echo "github.ref_type = ${{ github.ref_type }}"
-          echo "github.event_name = ${{ github.event_name }}"
           
       - name: Create Release
         if: github.ref_type == 'tag'
