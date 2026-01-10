@@ -1,23 +1,144 @@
 # NTP Clock
 
-A WiFi-enabled NTP clock using ESP32-S3-MINI-1 with a 7-segment LED display (MAX7219).
+A WiFi-enabled digital clock that automatically syncs time from the internet and displays it on a 7-segment LED display.
 
-## Features
+## Quick Start - Web Installer
 
-- **NTP Time Synchronization**: Automatically syncs time from NTP servers
-- **7-Segment Display**: Shows time as HHMM with flashing colon (decimal point)
-- **12/24 Hour Format**: Toggle between formats using MODE button
-- **Brightness Control**: Adjust display brightness using UP/DOWN buttons
-- **AP Mode Configuration**: Web-based configuration interface when WiFi is not configured
-- **Timezone Support**: Configurable timezone with daylight saving time support
-- **Persistent Settings**: All preferences saved across power cycles
+The easiest way to install the firmware is using the web-based installer:
 
-## Hardware
+1. **Open the Web Installer**
+   - Go to [https://mcyork.github.io/ntp_clock/installer/](https://mcyork.github.io/ntp_clock/installer/) in Chrome or Edge browser
+   - The installer uses Web Serial API, which requires a Chromium-based browser
+
+2. **Connect Your ESP32**
+   - Connect your ESP32-S3 board to your computer via USB
+   - Make sure the board is powered and detected by your system
+
+3. **Install Firmware**
+   - Click the "Install" button on the web page
+   - Select your ESP32 device when prompted
+   - Grant serial port access when your browser asks
+   - Wait for the installation to complete (the device will reboot automatically)
+
+4. **First Boot**
+   - After installation, the device will display its version number (2.15) for 5 seconds
+   - If WiFi credentials aren't configured, it will show "AP" and create a WiFi access point
+   - Connect to the access point (name will be like "NTP_Clock_A1B2C3") and configure your WiFi
+
+## Using Your NTP Clock
+
+### Display Sequence
+
+When your clock boots up, you'll see this sequence:
+
+1. **Version Display**: Shows "2.15" (or current version) for 5 seconds
+2. **Connection Status**: 
+   - "Conn" appears briefly when connecting to WiFi
+   - "AP" appears if WiFi isn't configured (see Configuration section below)
+3. **IP Address**: If in AP mode, the IP address scrolls across the display (e.g., "192.168.4.1")
+4. **Time Display**: Once connected and synced, shows current time as HHMM (e.g., "1234" for 12:34)
+
+### Button Controls
+
+Your clock has three buttons:
+
+- **MODE Button**: Toggles between 12-hour and 24-hour time format
+  - Press once: Switch formats (you'll hear a beep)
+  - Settings are saved automatically
+
+- **UP Button**: Increases display brightness
+  - Press to make the display brighter (0-15 levels)
+  - You'll hear a beep when brightness changes
+  - Settings are saved automatically
+
+- **DOWN Button**: Decreases display brightness
+  - Press to make the display dimmer
+  - You'll hear a beep when brightness changes
+  - Settings are saved automatically
+
+### Beep Sounds
+
+The clock makes different beep sounds to indicate status:
+
+- **Short high beep**: WiFi connected successfully
+- **Two-tone beep**: Time synchronized with internet
+- **Low beep**: Button pressed (MODE, UP, or DOWN)
+- **Long low beep**: Error occurred (WiFi connection failed)
+
+### Normal Operation
+
+When everything is working correctly:
+
+- The display shows the current time in HHMM format (e.g., "1234" for 12:34)
+- The decimal point on the hundreds digit flashes like a colon, indicating seconds
+- In 12-hour mode, leading zeros are hidden (e.g., " 123" instead of "0123")
+- The time updates every second
+- All settings persist across power cycles
+
+## Configuration via Web Interface
+
+If your clock shows "AP" on the display, it means WiFi isn't configured or the connection failed. Follow these steps:
+
+1. **Connect to Access Point**
+   - Look for a WiFi network named "NTP_Clock_" followed by 6 characters (e.g., "NTP_Clock_A1B2C3")
+   - Connect to this network (no password required)
+   - The display will scroll the IP address (usually "192.168.4.1")
+
+2. **Open Configuration Page**
+   - Open a web browser and go to `192.168.4.1`
+   - You'll see the configuration page
+
+3. **Enter Settings**
+   - **WiFi SSID**: Your WiFi network name
+   - **WiFi Password**: Your WiFi password
+   - **Timezone**: Select your timezone from the dropdown
+   - **Daylight Saving**: Enter offset in seconds (usually 3600 for 1 hour, or 0 if not applicable)
+   - **Brightness**: Set display brightness (0-15)
+   - **Time Format**: Choose 12-hour or 24-hour format
+
+4. **Save and Reboot**
+   - Click "Save Configuration"
+   - The device will reboot and attempt to connect to your WiFi
+   - If successful, it will show "Conn" then display the time
+   - If it fails, it will return to AP mode - check your WiFi credentials
+
+## Troubleshooting
+
+### Device Shows "AP" on Display
+
+- **Cause**: WiFi credentials not configured or connection failed
+- **Solution**: Connect to the "NTP_Clock_XXXXXX" WiFi network and configure at `192.168.4.1`
+
+### Device Shows "Err" on Display
+
+- **Cause**: WiFi connection failed or time sync lost
+- **Solution**: The device will automatically enter AP mode. Reconfigure WiFi settings via the web interface
+
+### Display Not Showing Time
+
+- **Check WiFi**: Make sure the device is connected to WiFi (should show "Conn" briefly, not "AP")
+- **Check Internet**: Ensure your WiFi network has internet access (needed for time sync)
+- **Wait**: It may take a few seconds after WiFi connects for time to sync
+
+### Beeps Not Working
+
+- **Check Hardware**: Verify the buzzer is connected to GPIO 4
+- **Normal**: Beeps are quiet - you may need to listen closely
+
+### Web Installer Not Working
+
+- **Browser**: Make sure you're using Chrome or Edge (Web Serial API requirement)
+- **USB Connection**: Verify ESP32 is connected and detected
+- **Permissions**: Grant serial port access when browser prompts
+
+## For Developers
+
+### Hardware Requirements
 
 - **MCU**: ESP32-S3-MINI-1
 - **Display**: MAX7219 7-segment LED display (4 digits)
 - **Buttons**: 3 buttons (MODE, UP, DOWN)
-- **Buzzer**: Piezo buzzer for audio feedback
+- **Buzzer**: Piezo buzzer
 
 ### Pin Configuration
 
@@ -26,175 +147,11 @@ A WiFi-enabled NTP clock using ESP32-S3-MINI-1 with a 7-segment LED display (MAX
 - **Buttons**: GPIO 5 (DOWN), GPIO 6 (UP), GPIO 7 (MODE)
 - **Buzzer**: GPIO 4
 
-## Installation
+### Building from Source
 
-### Method 1: Web Installer (Recommended)
-
-1. **Open the Web Installer**
-   - Navigate to the [installer page](https://mcyork.github.io/ntp_clock/installer/) in Chrome or Edge
-   - Or open `installer/index.html` locally
-
-2. **Connect Your ESP32**
-   - Connect your ESP32-S3 board to your computer via USB
-   - Ensure the board is powered and detected by your system
-
-3. **Configure Settings**
-   - Enter your WiFi SSID and password
-   - Select your timezone
-   - Click the install button
-
-4. **Flash Firmware**
-   - Select your ESP32 device when prompted
-   - Wait for the installation to complete
-   - The device will reboot and attempt to connect to WiFi
-
-5. **Configure via AP Mode** (if WiFi connection fails)
-   - The device will create an access point "NTP-Clock-AP"
-   - Connect to this network with your phone/computer
-   - Navigate to `192.168.4.1` in your browser
-   - Configure WiFi credentials and preferences
-   - Save and reboot
-
-### Method 2: Manual Installation
-
-1. **Clone the Repository**
-   ```bash
-   git clone https://github.com/mcyork/ntp_clock.git
-   cd ntp_clock
-   ```
-
-2. **Install Dependencies**
-   - Install [Arduino IDE](https://www.arduino.cc/en/software) or [PlatformIO](https://platformio.org/)
-   - Install ESP32 board support:
-     - Arduino IDE: Add `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json` to Additional Board Manager URLs
-     - Install "esp32" by Espressif Systems
-   - Select board: **ESP32S3 Dev Module** (or ESP32-S3-MINI-1)
-
-3. **Compile and Upload**
-   - Open `NTP_Clock.ino` in Arduino IDE
-   - Select the correct board and port
-   - Click Upload
-
-4. **Configure via AP Mode**
-   - After first boot, connect to "NTP-Clock-AP" WiFi network
-   - Navigate to `192.168.4.1`
-   - Enter WiFi credentials and timezone
-   - Save and reboot
-
-## Configuration
-
-### AP Mode Web Interface
-
-When WiFi is not configured or connection fails, the device enters AP mode:
-
-1. **Connect to AP**: Look for "NTP-Clock-AP" in your WiFi networks
-2. **Open Browser**: Navigate to `192.168.4.1`
-3. **Configure**:
-   - WiFi SSID and password
-   - Timezone offset (seconds from UTC)
-   - Daylight saving offset (usually 3600 seconds)
-   - Display brightness (0-15)
-   - Time format (12/24 hour)
-4. **Save**: Click "Save Configuration" - device will reboot
-
-### Button Controls
-
-- **MODE Button**: Toggle between 12-hour and 24-hour time format
-- **UP Button**: Increase display brightness
-- **DOWN Button**: Decrease display brightness
-
-All button settings are saved automatically and persist across reboots.
-
-## Timezone Configuration
-
-The device supports configurable timezones. Common timezone offsets:
-
-- **PST**: -28800 seconds (UTC-8)
-- **PDT**: -25200 seconds (UTC-7)
-- **EST**: -18000 seconds (UTC-5)
-- **EDT**: -14400 seconds (UTC-4)
-- **UTC**: 0 seconds
-- **CET**: 3600 seconds (UTC+1)
-- **JST**: 32400 seconds (UTC+9)
-
-Daylight saving time offset is typically 3600 seconds (1 hour) or 0 if not applicable.
-
-## Display Indicators
-
-- **"AP"**: Device is in AP mode (WiFi not configured)
-- **"Conn"**: Connecting to WiFi
-- **"Err"**: Error (WiFi connection failed)
-- **Time Display**: Shows current time in HHMM format with flashing colon
-
-## Building from Source
-
-### Using Arduino CLI
-
-```bash
-# Install ESP32 platform
-arduino-cli core install esp32:esp32
-
-# Install libraries
-arduino-cli lib install "WiFi" "SPI" "Preferences" "WebServer"
-
-# Compile
-arduino-cli compile --fqbn esp32:esp32:esp32s3 NTP_Clock.ino
-```
-
-### GitHub Actions
-
-The repository includes GitHub Actions workflow that automatically builds firmware on push and creates releases on tag push:
-
-```bash
-# Create a release
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-The workflow will:
-1. Build the firmware
-2. Create a GitHub release
-3. Upload the firmware binary
-4. The web installer will automatically use the latest release
-
-## Troubleshooting
-
-### Device Shows "AP" on Display
-
-- **Cause**: WiFi credentials not configured or connection failed
-- **Solution**: Connect to "NTP-Clock-AP" network and configure at `192.168.4.1`
-
-### Device Shows "Err" on Display
-
-- **Cause**: WiFi connection failed
-- **Solution**: Check WiFi credentials, ensure network is in range, device will enter AP mode
-
-### Time Not Syncing
-
-- **Cause**: WiFi connected but NTP sync failed
-- **Solution**: Check internet connection, verify NTP server is accessible
-
-### Web Installer Not Working
-
-- **Browser**: Ensure you're using Chrome, Edge, or another Chromium-based browser
-- **USB**: Verify ESP32 is connected and detected by system
-- **Permissions**: Grant serial port access when prompted
-
-### Display Not Working
-
-- **Wiring**: Verify SPI connections (SCK, MOSI, MISO, CS)
-- **Power**: Ensure ESP32 has adequate power supply
-- **CS Pin**: Verify display CS is connected to GPIO 11
+See the [GitHub repository](https://github.com/mcyork/ntp_clock) for build instructions and source code.
 
 ## Repository
 
 - **GitHub**: [mcyork/ntp_clock](https://github.com/mcyork/ntp_clock)
 - **Web Installer**: [mcyork.github.io/ntp_clock/installer/](https://mcyork.github.io/ntp_clock/installer/)
-
-## License
-
-[Add your license here]
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
