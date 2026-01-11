@@ -1,5 +1,5 @@
 /*
- * NTP Clock - Firmware v2.15
+ * NTP Clock - Firmware v2.16
  * Hardware: ESP32-S3-MINI-1
  * 
  * Features:
@@ -10,9 +10,10 @@
  * - Timezone configuration via Preferences with automatic DST handling
  * - Version display at boot
  * - IP address scrolling in AP mode
+ * - Improv WiFi provisioning via ESP Web Tools
  */
 
- #define FIRMWARE_VERSION "2.15"
+ #define FIRMWARE_VERSION "2.16"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -50,9 +51,6 @@ const int PIN_CS_DISP  = 11;
  long  gmtOffset_sec = 0;  // Will be loaded from Preferences
  int   daylightOffset_sec = 3600;  // Default 1 hour for DST
  
- // --- DISPLAY LIBRARY ---
- // Display driver is now in SevenSegmentDisplay library
- 
 // --- OBJECTS ---
 MAX7219Display display(PIN_CS_DISP);
 Preferences preferences;
@@ -72,6 +70,7 @@ bool showingVersion = true; // Guard flag to prevent loop() from overwriting ver
 unsigned long versionStartTime = 0; // When version display started
 bool showConnAfterVersion = false; // Flag to show "Conn" after version display
 bool showAPAfterVersion = false; // Flag to show "AP" after version display
+bool improvConnected = false; // Flag set when Improv WiFi successfully connects
 
 // Beep state variables (using LEDC instead of tone() to avoid timer conflicts)
 unsigned long beepEndTime = 0;
@@ -93,9 +92,46 @@ void startBeep(int frequency, int duration);
 void updateBeep();
 void beepBlocking(int frequency, int duration);
 bool detectTimezoneFromIP();
- 
-// Improv WiFi callback - called when WiFi connection is successful
-void onImprovConnected(const char* ssid, const char* password) {
+
+// =============================================================================
+// IMPROV WIFI CALLBACKS - These are REQUIRED for Improv to work!
+// =============================================================================
+
+// This function is called by the Improv library to actually connect to WiFi
+// WITHOUT THIS, Improv receives credentials but doesn't know how to use them!
+bool onImprovWiFiConnect(const char* ssid, const char* password) {
+  Serial.printf("Improv: Attempting to connect to SSID: %s\n", ssid);
+  Serial.flush();
+  
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  
+  // Wait for connection (up to 10 seconds)
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(500);
+    Serial.print(".");
+    attempts++;
+  }
+  Serial.println();
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("Improv: Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+    Serial.flush();
+    improvConnected = true;
+    return true;
+  } else {
+    Serial.println("Improv: Connection failed");
+    Serial.flush();
+    return false;
+  }
+}
+
+// This callback is called AFTER successful WiFi connection via Improv
+// Use this to save credentials and do post-connection setup
+void onImprovWiFiConnected(const char* ssid, const char* password) {
+  Serial.printf("Improv: Saving credentials for SSID: %s\n", ssid);
+  
   // Save WiFi credentials
   preferences.begin("wifi_config", false);
   preferences.putString("ssid", ssid);
@@ -113,48 +149,89 @@ void onImprovConnected(const char* ssid, const char* password) {
   }
 }
 
+// =============================================================================
+// SETUP
+// =============================================================================
+
 void setup() {
-  // Init Serial IMMEDIATELY - ESP32-S3 needs this early
+  // Init Serial IMMEDIATELY - ESP32-S3 USB CDC needs this early
   Serial.begin(115200);
-  delay(500); // Give Serial time to initialize on ESP32-S3
-  Serial.println("\n\n=== NTP Clock Starting ===");
-  Serial.println("Serial initialized at 115200 baud");
+  
+  // CRITICAL: Wait for USB CDC to enumerate on ESP32-S3
+  // This is necessary because USB CDC takes time to initialize after reboot
+  unsigned long serialWaitStart = millis();
+  while (!Serial && millis() - serialWaitStart < 2000) {
+    delay(10);
+  }
+  delay(100); // Extra settle time
+  
+  Serial.println("\n\n=== NTP Clock v" FIRMWARE_VERSION " Starting ===");
   Serial.flush();
+  
+  // Initialize WiFi in STA mode early - Improv needs this
+  WiFi.mode(WIFI_STA);
   delay(100);
   
-  Serial.println("Improv WiFi setup starting...");
+  // Generate unique AP SSID using MAC address
+  String macAddress = WiFi.macAddress();
+  macAddress.replace(":", "");
+  String macSuffix = macAddress.substring(macAddress.length() - 6);
+  apSSID = "NTP_Clock_" + macSuffix;
+  
+  // ==========================================================================
+  // IMPROV WIFI SETUP - Must happen BEFORE any blocking operations
+  // ==========================================================================
+  Serial.println("Setting up Improv WiFi...");
+  
+  // Configure device info
+  improvSerial.setDeviceInfo(
+    ImprovTypes::ChipFamily::CF_ESP32_S3,
+    "NTP-Clock",           // Short device name
+    FIRMWARE_VERSION,      // Firmware version
+    "NTP Clock"            // Device description
+  );
+  
+  // THIS IS THE KEY PART YOU WERE MISSING!
+  // Set the callback that actually performs the WiFi connection
+  improvSerial.setCustomConnectWiFi(onImprovWiFiConnect);
+  
+  // Set the callback for after successful connection (to save credentials)
+  improvSerial.onImprovConnected(onImprovWiFiConnected);
+  
+  Serial.println("Improv WiFi ready - waiting for provisioning...");
   Serial.flush();
   
-  // Setup Improv WiFi IMMEDIATELY - this must be ready before any WiFi operations
-  improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_S3, "NTP Clock", FIRMWARE_VERSION, "NTP Clock");
-  improvSerial.onImprovConnected(onImprovConnected);
+  // ==========================================================================
+  // IMPROV GRACE PERIOD
+  // ESP Web Tools needs time after device reboot to:
+  // 1. Detect the device is back
+  // 2. Open serial port
+  // 3. Send Improv handshake
+  // 4. Send credentials
+  // ==========================================================================
+  unsigned long improvStart = millis();
+  unsigned long improvTimeout = 10000; // 10 seconds
   
-  // TEMPORARY DEBUG: Enable Serial output to verify Improv WiFi is working
-  Serial.println("Improv WiFi initialized");
-  Serial.flush();
-  
-  // Give Improv WiFi a generous grace period to receive commands from ESP Web Tools
-  // ESP Web Tools needs time to detect device, establish Serial, and send Improv commands
-  // 15 seconds gives plenty of time for ESP Web Tools to detect and provision
-  // IMPORTANT: Do NOT perform any WiFi operations during this period as they interfere with Improv WiFi
-  unsigned long improvGracePeriod = millis() + 15000; // 15 second grace period
-  unsigned long lastDebugPrint = 0;
-  while (millis() < improvGracePeriod) {
-    improvSerial.handleSerial(); // Process Improv WiFi commands continuously
+  while (millis() - improvStart < improvTimeout) {
+    // Process Improv commands
+    improvSerial.handleSerial();
     
-    // TEMPORARY DEBUG: Print every second to verify we're in the loop
-    if (millis() - lastDebugPrint >= 1000) {
-      Serial.print("Improv WiFi waiting... ");
-      Serial.println(millis());
-      Serial.flush();
-      lastDebugPrint = millis();
+    // If Improv connected us, we're done waiting
+    if (improvConnected || WiFi.status() == WL_CONNECTED) {
+      Serial.println("Improv WiFi connected during grace period!");
+      break;
     }
     
-    delay(1); // Minimal delay to avoid tight loop, keep very responsive
+    // Small delay to prevent tight loop, but stay responsive
+    delay(10);
   }
   
-  Serial.println("Improv WiFi grace period ended");
+  Serial.println("Improv grace period ended");
   Serial.flush();
+  
+  // ==========================================================================
+  // HARDWARE INITIALIZATION
+  // ==========================================================================
   
   // Init Pins
   pinMode(PIN_BUZZER, OUTPUT);
@@ -166,71 +243,6 @@ void setup() {
   pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
   digitalWrite(PIN_BUZZER, LOW);
   
-  // Generate unique AP SSID using MAC address - MOVED HERE to avoid WiFi operations during Improv grace period
-  WiFi.mode(WIFI_STA);
-  String macAddress = WiFi.macAddress();
-  macAddress.replace(":", "");
-  String macSuffix = macAddress.substring(macAddress.length() - 6);
-  apSSID = "NTP_Clock_" + macSuffix;
-  
-  // Check if Improv WiFi already connected us
-  if (WiFi.status() == WL_CONNECTED) {
-    // Improv WiFi successfully provisioned - skip saved credentials
-    beepBlocking(2000, 100);
-    
-    // Try to auto-detect timezone from IP geolocation if not already configured
-    preferences.begin("ntp_clock", false);
-    long savedTimezone = preferences.getLong("timezone", 0);
-    preferences.end();
-    
-    // Only auto-detect if timezone hasn't been manually configured (default is 0)
-    if (savedTimezone == 0) {
-      detectTimezoneFromIP();
-      // Reload preferences after detection
-      preferences.begin("ntp_clock", false);
-      gmtOffset_sec = preferences.getLong("timezone", -28800);
-      daylightOffset_sec = preferences.getInt("dst_offset", 0);
-      preferences.end();
-    }
-  } else {
-    // Load WiFi credentials from Preferences (fallback if Improv WiFi didn't connect)
-    preferences.begin("wifi_config", false);
-    String savedSSID = preferences.getString("ssid", "");
-    String savedPassword = preferences.getString("password", "");
-    preferences.end();
-    
-    if (savedSSID.length() > 0) {
-      WiFi.mode(WIFI_STA);
-      WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
-    
-      int wifiAttempts = 0;
-      while (WiFi.status() != WL_CONNECTED && wifiAttempts < 30) {
-        delay(500);
-        improvSerial.handleSerial(); // Continue processing Improv WiFi during wait
-        wifiAttempts++;
-      }
-    
-      if (WiFi.status() == WL_CONNECTED) {
-        beepBlocking(2000, 100);
-        
-        // Try to auto-detect timezone from IP geolocation if not already configured
-        preferences.begin("ntp_clock", false);
-        long savedTimezone = preferences.getLong("timezone", 0);
-        preferences.end();
-        
-        // Only auto-detect if timezone hasn't been manually configured (default is 0)
-        if (savedTimezone == 0) {
-          detectTimezoneFromIP();
-          // Reload preferences after detection
-          preferences.begin("ntp_clock", false);
-          gmtOffset_sec = preferences.getLong("timezone", -28800);
-          daylightOffset_sec = preferences.getInt("dst_offset", 0);
-          preferences.end();
-        }
-      }
-    }
-  }
-  
   SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI);
   delay(100);
   
@@ -238,6 +250,7 @@ void setup() {
   display.begin();
   delay(200);
   
+  // Load preferences
   preferences.begin("ntp_clock", false);
   displayBrightness = preferences.getInt("brightness", 8);
   use24Hour = preferences.getBool("24hour", true);
@@ -248,86 +261,138 @@ void setup() {
   display.setBrightness(displayBrightness);
   delay(50);
   
+  // Show version
   showingVersion = true;
   versionStartTime = millis();
   display.displayText(FIRMWARE_VERSION, true);
   delay(100);
-   
-   if (WiFi.status() != WL_CONNECTED) {
+  
+  // ==========================================================================
+  // WIFI CONNECTION (if not already connected via Improv)
+  // ==========================================================================
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    // Already connected via Improv
+    Serial.println("Using Improv WiFi connection");
+    wifiConnected = true;
+    showConnAfterVersion = true;
+    beepBlocking(2000, 100);
+    
+    // Setup web server
+    server.on("/", handleRoot);
+    server.on("/config", handleConfig);
+    server.on("/save", HTTP_POST, handleSave);
+    server.on("/factory-reset", HTTP_POST, handleFactoryReset);
+    server.begin();
+    
+    showIPAddress = true;
+    ipDisplayCount = 0;
+    lastTimeUpdate = 0;
+    
+    // Configure NTP
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    delay(1000);
+    struct tm timeinfo;
+    if (getLocalTime(&timeinfo)) {
+      timeSynced = true;
+      beepBlocking(2500, 50);
+      delay(100);
+      beepBlocking(3000, 50);
+    }
+  } else {
+    // Try saved credentials
+    preferences.begin("wifi_config", false);
+    String savedSSID = preferences.getString("ssid", "");
+    String savedPassword = preferences.getString("password", "");
+    preferences.end();
+    
+    if (savedSSID.length() > 0) {
+      Serial.printf("Trying saved credentials: %s\n", savedSSID.c_str());
+      WiFi.mode(WIFI_STA);
+      WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
+    
+      int wifiAttempts = 0;
+      while (WiFi.status() != WL_CONNECTED && wifiAttempts < 30) {
+        delay(500);
+        improvSerial.handleSerial(); // Continue processing Improv during wait
+        wifiAttempts++;
+      }
+    
+      if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Connected to saved WiFi");
+        wifiConnected = true;
+        showConnAfterVersion = true;
+        beepBlocking(2000, 100);
+        
+        // Try to auto-detect timezone if not configured
+        preferences.begin("ntp_clock", false);
+        long savedTimezone = preferences.getLong("timezone", 0);
+        preferences.end();
+        
+        if (savedTimezone == 0) {
+          detectTimezoneFromIP();
+          preferences.begin("ntp_clock", false);
+          gmtOffset_sec = preferences.getLong("timezone", -28800);
+          daylightOffset_sec = preferences.getInt("dst_offset", 0);
+          preferences.end();
+        }
+        
+        // Setup web server
+        server.on("/", handleRoot);
+        server.on("/config", handleConfig);
+        server.on("/save", HTTP_POST, handleSave);
+        server.on("/factory-reset", HTTP_POST, handleFactoryReset);
+        server.begin();
+        
+        showIPAddress = true;
+        ipDisplayCount = 0;
+        lastTimeUpdate = 0;
+        
+        // Configure NTP
+        configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+        delay(1000);
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo)) {
+          timeSynced = true;
+          beepBlocking(2500, 50);
+          delay(100);
+          beepBlocking(3000, 50);
+        }
+      }
+    }
+  }
+  
+  // If still not connected, start AP mode
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Starting AP mode");
     apMode = true;
     showAPAfterVersion = true;
     
-     WiFi.mode(WIFI_AP);
-     WiFi.softAP(apSSID.c_str(), AP_PASSWORD);
-     delay(500);
-     
-     server.on("/", handleRoot);
-     server.on("/config", handleConfig);
-     server.on("/save", HTTP_POST, handleSave);
-     server.on("/factory-reset", HTTP_POST, handleFactoryReset);
-     server.begin();
-     
-     beepBlocking(1500, 200);
-  } else {
-    showConnAfterVersion = true;
-     
-     if (WiFi.status() == WL_CONNECTED) {
-       wifiConnected = true;
-       beepBlocking(3000, 100);
-       
-       server.on("/", handleRoot);
-       server.on("/config", handleConfig);
-       server.on("/save", HTTP_POST, handleSave);
-       server.on("/factory-reset", HTTP_POST, handleFactoryReset);
-       server.begin();
-       
-       showIPAddress = true;
-       ipDisplayCount = 0;
-       lastTimeUpdate = 0;
-       
-       configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-       delay(1000);
-       struct tm timeinfo;
-       if (getLocalTime(&timeinfo)) {
-         timeSynced = true;
-         beepBlocking(2500, 50);
-         delay(100);
-         beepBlocking(3000, 50);
-       }
-       
-       display.clear();
-       delay(500);
-     } else {
-      display.displayText("Err ");
-       beepBlocking(500, 500);
-       delay(2000);
-       
-       apMode = true;
-       WiFi.mode(WIFI_AP);
-       WiFi.softAP(apSSID.c_str(), AP_PASSWORD);
-       delay(500);
-       server.on("/", handleRoot);
-       server.on("/config", handleConfig);
-       server.on("/save", HTTP_POST, handleSave);
-       server.on("/factory-reset", HTTP_POST, handleFactoryReset);
-       server.begin();
-       
-      display.displayText("AP  ");
-     }
-   }
- }
- 
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(apSSID.c_str(), AP_PASSWORD);
+    delay(500);
+    
+    server.on("/", handleRoot);
+    server.on("/config", handleConfig);
+    server.on("/save", HTTP_POST, handleSave);
+    server.on("/factory-reset", HTTP_POST, handleFactoryReset);
+    server.begin();
+    
+    beepBlocking(1500, 200);
+  }
+  
+  display.clear();
+  delay(500);
+}
+
+// =============================================================================
+// LOOP
+// =============================================================================
+
 void loop() {
-  // Process Improv WiFi commands continuously
+  // ALWAYS process Improv commands - allows re-provisioning while running
   improvSerial.handleSerial();
   
-  // TEMPORARY DEBUG: Print a dot every second to verify Serial is working
-  static unsigned long lastDotTime = 0;
-  if (millis() - lastDotTime >= 1000) {
-    Serial.print(".");
-    Serial.flush();
-    lastDotTime = millis();
-  }
   if (showingVersion) {
     if (millis() - versionStartTime >= 5000) {
       showingVersion = false;
@@ -350,9 +415,9 @@ void loop() {
   display.update();
   
   if (apMode) {
-     server.handleClient();
-     handleButtons();
-     
+    server.handleClient();
+    handleButtons();
+    
     static String ipAddressStr = "";
     static bool ipScrollingStarted = false;
     if (!ipScrollingStarted) {
@@ -360,10 +425,10 @@ void loop() {
       display.startScrolling(ipAddressStr.c_str(), 350);
       ipScrollingStarted = true;
     }
-   } else {
-     server.handleClient();
-     handleButtons();
-     
+  } else {
+    server.handleClient();
+    handleButtons();
+    
     if (showIPAddress && wifiConnected) {
       static bool ipScrollingStarted = false;
       static unsigned long ipStartTime = 0;
@@ -388,45 +453,49 @@ void loop() {
       }
       return;
     }
-     
-     if (millis() - lastTimeUpdate >= 1000) {
-       lastTimeUpdate = millis();
-       
-       if (wifiConnected && timeSynced) {
-         struct tm timeinfo;
-         if (getLocalTime(&timeinfo)) {
-           int hours = timeinfo.tm_hour;
-           int minutes = timeinfo.tm_min;
-           int seconds = timeinfo.tm_sec;
-           bool showColon = (seconds % 2 == 0);
-           display.displayTime(hours, minutes, showColon, !use24Hour);
-         } else {
-           display.displayText("Err ");
-           timeSynced = false;
-         }
-       }
-     }
-   }
-   
-   delay(10);
- }
- 
- void handleButtons() {
-   bool btnMode = (digitalRead(PIN_BTN_MODE) == LOW);
-   bool btnUp = (digitalRead(PIN_BTN_UP) == LOW);
-   bool btnDown = (digitalRead(PIN_BTN_DOWN) == LOW);
-   unsigned long now = millis();
-   
-   if (btnMode && !lastModeState && (now - lastButtonPress > 200)) {
-     use24Hour = !use24Hour;
-     preferences.begin("ntp_clock", false);
-     preferences.putBool("24hour", use24Hour);
-     preferences.end();
-     startBeep(2000, 50);
-     lastButtonPress = now;
-   }
-   lastModeState = btnMode;
-   
+    
+    if (millis() - lastTimeUpdate >= 1000) {
+      lastTimeUpdate = millis();
+      
+      if (wifiConnected && timeSynced) {
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo)) {
+          int hours = timeinfo.tm_hour;
+          int minutes = timeinfo.tm_min;
+          int seconds = timeinfo.tm_sec;
+          bool showColon = (seconds % 2 == 0);
+          display.displayTime(hours, minutes, showColon, !use24Hour);
+        } else {
+          display.displayText("Err ");
+          timeSynced = false;
+        }
+      }
+    }
+  }
+  
+  delay(10);
+}
+
+// =============================================================================
+// BUTTON HANDLERS
+// =============================================================================
+
+void handleButtons() {
+  bool btnMode = (digitalRead(PIN_BTN_MODE) == LOW);
+  bool btnUp = (digitalRead(PIN_BTN_UP) == LOW);
+  bool btnDown = (digitalRead(PIN_BTN_DOWN) == LOW);
+  unsigned long now = millis();
+  
+  if (btnMode && !lastModeState && (now - lastButtonPress > 200)) {
+    use24Hour = !use24Hour;
+    preferences.begin("ntp_clock", false);
+    preferences.putBool("24hour", use24Hour);
+    preferences.end();
+    startBeep(2000, 50);
+    lastButtonPress = now;
+  }
+  lastModeState = btnMode;
+  
   if (btnUp && !lastUpState && (now - lastButtonPress > 200)) {
     if (displayBrightness < 15) {
       displayBrightness++;
@@ -452,8 +521,12 @@ void loop() {
     lastButtonPress = now;
   }
   lastDownState = btnDown;
- }
- 
+}
+
+// =============================================================================
+// WEB SERVER HANDLERS
+// =============================================================================
+
 void handleRoot() {
   server.send(200, "text/html", getConfigPageHTML(preferences));
 }
@@ -461,63 +534,66 @@ void handleRoot() {
 void handleConfig() {
   server.send(200, "text/html", getConfigPageHTML(preferences));
 }
- 
- void handleSave() {
-   String ssid = server.arg("ssid");
-   String password = server.arg("password");
-   String timezoneStr = server.arg("timezone");
-   String dstOffsetStr = server.arg("dst_offset");
-   String brightnessStr = server.arg("brightness");
-   String hourFormatStr = server.arg("hour_format");
-   
-   preferences.begin("wifi_config", false);
-   preferences.putString("ssid", ssid);
-   // Only update password if a new one was provided
-   if (password.length() > 0) {
-     preferences.putString("password", password);
-   }
-   preferences.end();
-   
-   long timezoneOffset = timezoneStr.toInt();
-   int dstOffset = dstOffsetStr.toInt();
-   preferences.begin("ntp_clock", false);
-   preferences.putLong("timezone", timezoneOffset);
-   preferences.putInt("dst_offset", dstOffset);
-   
-   if (brightnessStr.length() > 0) {
-     int brightness = brightnessStr.toInt();
-     if (brightness >= 0 && brightness <= 15) {
+
+void handleSave() {
+  String ssid = server.arg("ssid");
+  String password = server.arg("password");
+  String timezoneStr = server.arg("timezone");
+  String dstOffsetStr = server.arg("dst_offset");
+  String brightnessStr = server.arg("brightness");
+  String hourFormatStr = server.arg("hour_format");
+  
+  preferences.begin("wifi_config", false);
+  preferences.putString("ssid", ssid);
+  if (password.length() > 0) {
+    preferences.putString("password", password);
+  }
+  preferences.end();
+  
+  long timezoneOffset = timezoneStr.toInt();
+  int dstOffset = dstOffsetStr.toInt();
+  preferences.begin("ntp_clock", false);
+  preferences.putLong("timezone", timezoneOffset);
+  preferences.putInt("dst_offset", dstOffset);
+  
+  if (brightnessStr.length() > 0) {
+    int brightness = brightnessStr.toInt();
+    if (brightness >= 0 && brightness <= 15) {
       preferences.putInt("brightness", brightness);
       displayBrightness = brightness;
       display.setBrightness(displayBrightness);
-     }
-   }
-   
-   if (hourFormatStr.length() > 0) {
-     preferences.putBool("24hour", hourFormatStr == "24");
-     use24Hour = (hourFormatStr == "24");
-   }
-   
-   preferences.end();
-   
+    }
+  }
+  
+  if (hourFormatStr.length() > 0) {
+    preferences.putBool("24hour", hourFormatStr == "24");
+    use24Hour = (hourFormatStr == "24");
+  }
+  
+  preferences.end();
+  
   server.send(200, "text/html", getSaveSuccessPageHTML());
-   delay(1000);
-   ESP.restart();
- }
- 
- void handleFactoryReset() {
-   preferences.begin("wifi_config", false);
-   preferences.clear();
-   preferences.end();
-   
-   preferences.begin("ntp_clock", false);
-   preferences.clear();
-   preferences.end();
-   
-  server.send(200, "text/html", getFactoryResetPageHTML());
-   delay(1000);
-   ESP.restart();
+  delay(1000);
+  ESP.restart();
 }
+
+void handleFactoryReset() {
+  preferences.begin("wifi_config", false);
+  preferences.clear();
+  preferences.end();
+  
+  preferences.begin("ntp_clock", false);
+  preferences.clear();
+  preferences.end();
+  
+  server.send(200, "text/html", getFactoryResetPageHTML());
+  delay(1000);
+  ESP.restart();
+}
+
+// =============================================================================
+// BEEP FUNCTIONS
+// =============================================================================
 
 void startBeep(int frequency, int duration) {
   ledcAttach(PIN_BUZZER, frequency, 8);
@@ -542,6 +618,10 @@ void beepBlocking(int frequency, int duration) {
   ledcDetach(PIN_BUZZER);
 }
 
+// =============================================================================
+// TIMEZONE DETECTION
+// =============================================================================
+
 bool detectTimezoneFromIP() {
   HTTPClient http;
   http.begin("http://ip-api.com/json/?fields=status,offset");
@@ -552,21 +632,17 @@ bool detectTimezoneFromIP() {
   if (httpCode == HTTP_CODE_OK) {
     String payload = http.getString();
     
-    // Parse JSON response
-    // Expected format: {"status":"success","offset":-28800}
     DynamicJsonDocument doc(512);
     DeserializationError error = deserializeJson(doc, payload);
     
     if (!error && doc["status"] == "success" && doc.containsKey("offset")) {
       long offset = doc["offset"].as<long>();
       
-      // Save detected timezone
       preferences.begin("ntp_clock", false);
       preferences.putLong("timezone", offset);
-      preferences.putInt("dst_offset", 0); // DST handled automatically via offset
+      preferences.putInt("dst_offset", 0);
       preferences.end();
       
-      // Update global variables
       gmtOffset_sec = offset;
       daylightOffset_sec = 0;
       
@@ -578,5 +654,3 @@ bool detectTimezoneFromIP() {
   http.end();
   return false;
 }
-
- 
