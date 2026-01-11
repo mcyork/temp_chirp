@@ -35,8 +35,10 @@ When your clock boots up, you'll see this sequence:
 2. **Connection Status**: 
    - "Conn" appears briefly when connecting to WiFi
    - "AP" appears if WiFi isn't configured (see Configuration section below)
-3. **IP Address**: If in AP mode, the IP address scrolls across the display (e.g., "192.168.4.1")
-4. **Time Display**: Once connected and synced, shows current time as HHMM (e.g., "1234" for 12:34)
+3. **IP Address**: 
+   - If connected to WiFi: The assigned IP address scrolls across the display twice (e.g., "192.168.1.100")
+   - If in AP mode: The AP IP address scrolls across the display (e.g., "192.168.4.1")
+4. **Time Display**: Once connected and synced, shows current time as HHMM (e.g., "12.34" for 12:34, with the decimal point flashing like a colon)
 
 ### Button Controls
 
@@ -69,7 +71,7 @@ The clock makes different beep sounds to indicate status:
 
 When everything is working correctly:
 
-- The display shows the current time in HHMM format (e.g., "1234" for 12:34)
+- The display shows the current time in HHMM format (e.g., "12.34" for 12:34)
 - The decimal point on the hundreds digit flashes like a colon, indicating seconds
 - In 12-hour mode, leading zeros are hidden (e.g., " 123" instead of "0123")
 - The time updates every second

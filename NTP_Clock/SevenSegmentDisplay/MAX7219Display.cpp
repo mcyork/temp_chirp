@@ -3,6 +3,7 @@
  */
 
 #include "MAX7219Display.h"
+#include "glyphs.h"
 #include <SPI.h>
 #include <string.h>
 

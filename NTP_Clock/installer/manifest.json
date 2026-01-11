@@ -1,6 +1,6 @@
 {
   "name": "NTP Clock Firmware",
-  "version": "1.0.0",
+  "version": "2.15",
   "builds": [
     {
       "chipFamily": "ESP32-S3",
