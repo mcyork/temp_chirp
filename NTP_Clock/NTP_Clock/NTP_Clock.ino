@@ -1,5 +1,5 @@
 /*
- * NTP Clock - Firmware v2.16
+ * NTP Clock - Firmware v2.17
  * Hardware: ESP32-S3-MINI-1
  * 
  * Features:
@@ -13,7 +13,7 @@
  * - Improv WiFi provisioning via ESP Web Tools
  */
 
- #define FIRMWARE_VERSION "2.16"
+ #define FIRMWARE_VERSION "2.17"
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -515,17 +515,48 @@ void loop() {
   display.update();
   
   if (apMode) {
-    server.handleClient();
-    handleButtons();
-    
-    static String ipAddressStr = "";
-    static bool ipScrollingStarted = false;
-    if (!ipScrollingStarted) {
-      ipAddressStr = WiFi.softAPIP().toString();
-      display.startScrolling(ipAddressStr.c_str(), 350);
-      ipScrollingStarted = true;
+    // Check if WiFi connected while in AP mode (e.g., via Improv WiFi provisioning)
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("WiFi connected while in AP mode - switching to STA mode");
+      apMode = false;
+      wifiConnected = true;
+      showIPAddress = true;
+      ipDisplayCount = 0;
+      display.clear();
+      delay(500);
+      
+      // Configure NTP now that we're connected
+      configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+      timeSynced = false;
+      lastTimeUpdate = 0;
+      
+      // Stop AP mode
+      WiFi.softAPdisconnect(true);
+      WiFi.mode(WIFI_STA);
+      
+      beepBlocking(2000, 100);
+      delay(100);
+      beepBlocking(3000, 100);
+      
+      // Continue to normal WiFi mode handling below
+    } else {
+      // Still in AP mode - handle AP mode display
+      server.handleClient();
+      handleButtons();
+      
+      static String ipAddressStr = "";
+      static bool ipScrollingStarted = false;
+      if (!ipScrollingStarted) {
+        ipAddressStr = WiFi.softAPIP().toString();
+        display.startScrolling(ipAddressStr.c_str(), 350);
+        ipScrollingStarted = true;
+      }
+      return; // Stay in AP mode handling
     }
-  } else {
+  }
+  
+  // Normal WiFi mode (not AP mode)
+  if (!apMode) {
     server.handleClient();
     handleButtons();
     
