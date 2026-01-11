@@ -21,7 +21,7 @@ The easiest way to install the firmware is using the web-based installer:
    - Wait for the installation to complete (the device will reboot automatically)
 
 4. **First Boot**
-   - After installation, the device will display its version number (2.15) for 5 seconds
+   - After installation, the device will display its version number (2.17) for 5 seconds
    - If WiFi credentials aren't configured, it will show "AP" and create a WiFi access point
    - Connect to the access point (name will be like "NTP_Clock_A1B2C3") and configure your WiFi
 
@@ -31,7 +31,7 @@ The easiest way to install the firmware is using the web-based installer:
 
 When your clock boots up, you'll see this sequence:
 
-1. **Version Display**: Shows "2.15" (or current version) for 5 seconds
+1. **Version Display**: Shows "2.17" (or current version) for 5 seconds
 2. **Connection Status**: 
    - "Conn" appears briefly when connecting to WiFi
    - "AP" appears if WiFi isn't configured (see Configuration section below)

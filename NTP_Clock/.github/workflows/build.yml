@@ -53,8 +53,12 @@ jobs:
           # Copy library directory and header files
           cp -r SevenSegmentDisplay NTP_Clock/
           cp web_pages.h NTP_Clock/
-          # Compile with library path specified
-          arduino-cli compile --fqbn esp32:esp32:esp32s3 --library ~/.arduino15/libraries/ImprovWiFiLibrary NTP_Clock --build-path ./build
+          # Compile with library path specified and USB CDC enabled
+          # USBMode=hwcdc enables Hardware CDC and JTAG
+          # CDCOnBoot=cdc enables CDC on boot
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc \
+            --library ~/.arduino15/libraries/ImprovWiFiLibrary NTP_Clock --build-path ./build
           
       - name: Copy firmware to installer directory
         run: |

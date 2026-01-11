@@ -27,6 +27,81 @@
 #include "SevenSegmentDisplay/MAX7219Display.h"
 #include "SevenSegmentDisplay/MAX7219Display.cpp"
 #include "web_pages.h"
+
+// =============================================================================
+// ESP32-S3 USB CDC WORKAROUND
+// ESP32-S3 has a bug where Serial.available() doesn't reliably update.
+// This buffered wrapper uses event callbacks to capture incoming data.
+// =============================================================================
+class BufferedHWCDC : public Stream {
+private:
+  uint8_t buffer[256];
+  volatile uint16_t head = 0;
+  volatile uint16_t tail = 0;
+  volatile uint16_t count = 0;
+
+public:
+  void feedByte(uint8_t byte) {
+    if (count < sizeof(buffer)) {
+      buffer[tail] = byte;
+      tail = (tail + 1) % sizeof(buffer);
+      count++;
+    }
+  }
+
+  virtual int available() override {
+    return count;
+  }
+
+  virtual int read() override {
+    if (count == 0) return -1;
+    uint8_t byte = buffer[head];
+    head = (head + 1) % sizeof(buffer);
+    count--;
+    return byte;
+  }
+
+  virtual int peek() override {
+    if (count == 0) return -1;
+    return buffer[head];
+  }
+
+  virtual void flush() override {
+    // Nothing to flush for input buffer
+  }
+
+  virtual size_t write(uint8_t byte) override {
+    return Serial.write(byte);
+  }
+
+  virtual size_t write(const uint8_t *buffer, size_t size) override {
+    return Serial.write(buffer, size);
+  }
+
+  virtual int availableForWrite() override {
+    return Serial.availableForWrite();
+  }
+};
+
+BufferedHWCDC bufferedSerial;
+
+// Event callback for ESP32-S3 USB CDC RX events
+// This is called by Serial.onEvent() when data arrives
+static void hwcdcEventCallback(void* arg, esp_event_base_t event_base, 
+                                int32_t event_id, void* event_data) {
+  if (event_base == ARDUINO_HW_CDC_EVENTS && event_id == ARDUINO_HW_CDC_RX_EVENT) {
+    // Read all available bytes from Serial and feed to buffer
+    int count = 0;
+    while (Serial.available()) {
+      bufferedSerial.feedByte(Serial.read());
+      count++;
+    }
+    if (count > 0) {
+      Serial.printf("[EVENT] Fed %d bytes to buffer\n", count);
+      Serial.flush();
+    }
+  }
+}
  
  // --- PIN DEFINITIONS ---
  const int PIN_BTN_MODE = 7; 
@@ -55,7 +130,8 @@ const int PIN_CS_DISP  = 11;
 MAX7219Display display(PIN_CS_DISP);
 Preferences preferences;
 WebServer server(80);
-ImprovWiFi improvSerial(&Serial);
+// Use buffered wrapper instead of Serial directly to work around ESP32-S3 USB CDC bug
+ImprovWiFi improvSerial(&bufferedSerial);
  
 // --- STATE VARIABLES ---
 bool wifiConnected = false;
@@ -165,7 +241,13 @@ void setup() {
   }
   delay(100); // Extra settle time
   
+  // CRITICAL: Register event callback for ESP32-S3 USB CDC workaround
+  // This captures incoming Serial data via events since Serial.available() is broken
+  // With USB CDC on boot enabled (USBMode=hwcdc,CDCOnBoot=1 in build.yml), Serial is HWCDC
+  Serial.onEvent(hwcdcEventCallback);
+  
   Serial.println("\n\n=== NTP Clock v" FIRMWARE_VERSION " Starting ===");
+  Serial.println("HWCDC event handler registered");
   Serial.flush();
   
   // Initialize WiFi in STA mode early - Improv needs this
@@ -214,6 +296,7 @@ void setup() {
   
   while (millis() - improvStart < improvTimeout) {
     // Process Improv commands
+    // The bufferedSerial wrapper now handles Serial input via event callbacks
     improvSerial.handleSerial();
     
     // If Improv connected us, we're done waiting
@@ -390,6 +473,23 @@ void setup() {
 // =============================================================================
 
 void loop() {
+  // FALLBACK: Always poll Serial directly as backup
+  // This is a workaround for ESP32-S3 USB CDC Serial.available() bug
+  // Even with event handler, polling ensures we don't miss data
+  static unsigned long lastPollDebug = 0;
+  if (Serial.available() > 0) {
+    int pollCount = 0;
+    while (Serial.available()) {
+      bufferedSerial.feedByte(Serial.read());
+      pollCount++;
+    }
+    if (millis() - lastPollDebug > 1000) {  // Debug once per second max
+      Serial.printf("[POLL] Fed %d bytes to buffer\n", pollCount);
+      Serial.flush();
+      lastPollDebug = millis();
+    }
+  }
+  
   // ALWAYS process Improv commands - allows re-provisioning while running
   improvSerial.handleSerial();
   
