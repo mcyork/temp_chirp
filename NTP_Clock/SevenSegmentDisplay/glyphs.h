@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-// Segments are REVERSED: bit0->G, bit1->F, bit2->E, bit3->D, bit4->C, bit5->B, bit6->A, bit7->DP
+// Segments are REVERSED:  bit0->G, bit1->F, bit2->E, bit3->D, bit4->C, bit5->B, bit6->A, bit7->DP
 // To display segment A (top), send bit6. To display B (top-right), send bit5. etc.
 // This matches the physical display wiring
 
