@@ -51,7 +51,8 @@ jobs:
           # Copy library directory and header files
           cp -r SevenSegmentDisplay NTP_Clock/
           cp web_pages.h NTP_Clock/
-          arduino-cli compile --fqbn esp32:esp32:esp32s3 NTP_Clock --build-path ./build
+          # Compile with library path specified
+          arduino-cli compile --fqbn esp32:esp32:esp32s3 --library ~/.arduino15/libraries/ImprovWiFiLibrary NTP_Clock --build-path ./build
           
       - name: Copy firmware to installer directory
         run: |
