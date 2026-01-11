@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NTP Clock Firmware Installer</title>
-    <script type="module" src="https://unpkg.com/esp-web-tools@9/dist/web/install-button.js"></script>
+    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js"></script>
     <style>
         * {
             margin: 0;
@@ -149,51 +149,23 @@
             This installer requires Chrome, Edge, or another Chromium-based browser with Web Serial API support.
         </div>
         
-        <div class="section">
-            <div class="section-title">WiFi Configuration</div>
-            <div class="form-group">
-                <label for="wifi-ssid">WiFi SSID *</label>
-                <input type="text" id="wifi-ssid" placeholder="Enter your WiFi network name" required>
-            </div>
-            <div class="form-group">
-                <label for="wifi-password">WiFi Password *</label>
-                <input type="password" id="wifi-password" placeholder="Enter your WiFi password" required>
-            </div>
-        </div>
-        
-        <div class="section">
-            <div class="section-title">Timezone Configuration</div>
-            <div class="form-group">
-                <label for="timezone">Timezone *</label>
-                <select id="timezone" required>
-                    <option value="-28800">Pacific Time (PT) - UTC-8 (PST/PDT with DST)</option>
-                    <option value="-21600">Mountain Time (MT) - UTC-7 (MST/MDT with DST)</option>
-                    <option value="-18000">Central Time (CT) - UTC-6 (CST/CDT with DST)</option>
-                    <option value="-14400">Eastern Time (ET) - UTC-5 (EST/EDT with DST)</option>
-                    <option value="0">UTC (Coordinated Universal Time)</option>
-                    <option value="3600">Central European Time (CET) - UTC+1</option>
-                    <option value="7200">Central European Summer Time (CEST) - UTC+2</option>
-                    <option value="28800">China Standard Time (CST) - UTC+8</option>
-                    <option value="32400">Japan Standard Time (JST) - UTC+9</option>
-                    <option value="36000">Australian Eastern Standard Time (AEST) - UTC+10</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="daylight-offset">Daylight Saving Offset (seconds)</label>
-                <input type="text" id="daylight-offset" value="0" placeholder="0">
-                <small style="color: #666; font-size: 0.85em; display: block; margin-top: 5px;">
-                    Usually 0 (DST handled automatically) or 3600 (1 hour) for manual DST
-                </small>
-            </div>
+        <div class="info-box" style="background: #fff3cd; border-left-color: #ffc107;">
+            <strong>✨ Improv WiFi Support</strong><br>
+            This firmware includes Improv WiFi support. After installation completes, ESP Web Tools will automatically detect this and show a WiFi provisioning interface. You'll be able to enter your WiFi credentials directly in that interface.
         </div>
         
         <div class="info-box">
             <strong>Installation Steps:</strong><br>
             1. Connect your ESP32-S3 board via USB<br>
-            2. Fill in WiFi credentials and timezone above<br>
-            3. Click the install button below<br>
-            4. Select your ESP32 device when prompted<br>
-            5. Wait for installation to complete - credentials will be sent automatically
+            2. Click the install button below<br>
+            3. Select your ESP32 device when prompted<br>
+            4. After installation, ESP Web Tools will automatically detect Improv WiFi support<br>
+            5. A WiFi provisioning UI will appear - enter your WiFi credentials there<br>
+            6. Configure timezone via AP mode web interface if needed (192.168.4.1)
+        </div>
+        
+        <div class="info-box" style="margin-top: 15px; background: #e7f3ff; border-left-color: #2196F3;">
+            <strong>ℹ️ Note:</strong> This firmware supports Improv WiFi. After installation, ESP Web Tools will automatically show a WiFi configuration interface. The timezone can be configured later via the device's AP mode web interface.
         </div>
         
         <div class="install-button-container">
@@ -208,10 +180,6 @@
     
     <script>
         const installButton = document.getElementById('install-button');
-        const wifiSsidInput = document.getElementById('wifi-ssid');
-        const wifiPasswordInput = document.getElementById('wifi-password');
-        const timezoneSelect = document.getElementById('timezone');
-        const daylightOffsetInput = document.getElementById('daylight-offset');
         const statusMessage = document.getElementById('status-message');
         
         function showStatus(message, isError = false) {
@@ -220,29 +188,9 @@
             statusMessage.style.display = 'block';
         }
         
-        // Intercept the install button click to validate inputs
-        installButton.addEventListener('esp-web-install-button-click', (e) => {
-            const ssid = wifiSsidInput.value.trim();
-            const password = wifiPasswordInput.value.trim();
-            
-            if (!ssid || !password) {
-                e.preventDefault();
-                alert('Please enter WiFi SSID and password');
-                return;
-            }
-        });
-        
-        // ESP Web Tools will automatically use Improv WiFi if firmware supports it
-        // After installation, Improv WiFi provisioning will happen automatically
+        // ESP Web Tools will automatically detect Improv WiFi support and show provisioning UI
         installButton.addEventListener('esp-web-install-button-install-success', async () => {
-            const ssid = wifiSsidInput.value.trim();
-            const password = wifiPasswordInput.value.trim();
-            
-            if (ssid && password) {
-                showStatus('Installation complete! WiFi configuration will be sent via Improv WiFi protocol.');
-            } else {
-                showStatus('Installation complete! Please configure WiFi via AP mode at 192.168.4.1', false);
-            }
+            showStatus('Installation complete! ESP Web Tools will now show the Improv WiFi provisioning interface.', false);
         });
         
         // Handle manifest loading errors
