@@ -114,12 +114,16 @@ void onImprovConnected(const char* ssid, const char* password) {
 }
 
 void setup() {
-  delay(100); // Minimal delay for hardware stabilization
-  
-  // Init Serial for Improv WiFi protocol FIRST - must be ready immediately
+  // Init Serial IMMEDIATELY - ESP32-S3 needs this early
   Serial.begin(115200);
-  Serial.flush(); // Clear any buffered data
-  delay(100); // Brief delay for Serial to stabilize
+  delay(500); // Give Serial time to initialize on ESP32-S3
+  Serial.println("\n\n=== NTP Clock Starting ===");
+  Serial.println("Serial initialized at 115200 baud");
+  Serial.flush();
+  delay(100);
+  
+  Serial.println("Improv WiFi setup starting...");
+  Serial.flush();
   
   // Setup Improv WiFi IMMEDIATELY - this must be ready before any WiFi operations
   improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_S3, "NTP Clock", FIRMWARE_VERSION, "NTP Clock");
@@ -315,13 +319,15 @@ void setup() {
  
 void loop() {
   // Process Improv WiFi commands continuously
-  // TEMPORARY DEBUG: Check if Serial has data
-  if (Serial.available() > 0) {
-    Serial.print("Serial data available: ");
-    Serial.println(Serial.available());
-    Serial.flush();
-  }
   improvSerial.handleSerial();
+  
+  // TEMPORARY DEBUG: Print a dot every second to verify Serial is working
+  static unsigned long lastDotTime = 0;
+  if (millis() - lastDotTime >= 1000) {
+    Serial.print(".");
+    Serial.flush();
+    lastDotTime = millis();
+  }
   if (showingVersion) {
     if (millis() - versionStartTime >= 5000) {
       showingVersion = false;

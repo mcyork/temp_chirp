@@ -114,15 +114,47 @@ void onImprovConnected(const char* ssid, const char* password) {
 }
 
 void setup() {
-  delay(2000);
-  
-  // Init Serial for Improv WiFi protocol
+  // Init Serial IMMEDIATELY - ESP32-S3 needs this early
   Serial.begin(115200);
-  delay(500);
+  delay(500); // Give Serial time to initialize on ESP32-S3
+  Serial.println("\n\n=== NTP Clock Starting ===");
+  Serial.println("Serial initialized at 115200 baud");
+  Serial.flush();
+  delay(100);
   
-  // Setup Improv WiFi
+  Serial.println("Improv WiFi setup starting...");
+  Serial.flush();
+  
+  // Setup Improv WiFi IMMEDIATELY - this must be ready before any WiFi operations
   improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_S3, "NTP Clock", FIRMWARE_VERSION, "NTP Clock");
   improvSerial.onImprovConnected(onImprovConnected);
+  
+  // TEMPORARY DEBUG: Enable Serial output to verify Improv WiFi is working
+  Serial.println("Improv WiFi initialized");
+  Serial.flush();
+  
+  // Give Improv WiFi a generous grace period to receive commands from ESP Web Tools
+  // ESP Web Tools needs time to detect device, establish Serial, and send Improv commands
+  // 15 seconds gives plenty of time for ESP Web Tools to detect and provision
+  // IMPORTANT: Do NOT perform any WiFi operations during this period as they interfere with Improv WiFi
+  unsigned long improvGracePeriod = millis() + 15000; // 15 second grace period
+  unsigned long lastDebugPrint = 0;
+  while (millis() < improvGracePeriod) {
+    improvSerial.handleSerial(); // Process Improv WiFi commands continuously
+    
+    // TEMPORARY DEBUG: Print every second to verify we're in the loop
+    if (millis() - lastDebugPrint >= 1000) {
+      Serial.print("Improv WiFi waiting... ");
+      Serial.println(millis());
+      Serial.flush();
+      lastDebugPrint = millis();
+    }
+    
+    delay(1); // Minimal delay to avoid tight loop, keep very responsive
+  }
+  
+  Serial.println("Improv WiFi grace period ended");
+  Serial.flush();
   
   // Init Pins
   pinMode(PIN_BUZZER, OUTPUT);
@@ -134,48 +166,67 @@ void setup() {
   pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
   digitalWrite(PIN_BUZZER, LOW);
   
-  // Generate unique AP SSID using MAC address
+  // Generate unique AP SSID using MAC address - MOVED HERE to avoid WiFi operations during Improv grace period
   WiFi.mode(WIFI_STA);
   String macAddress = WiFi.macAddress();
   macAddress.replace(":", "");
   String macSuffix = macAddress.substring(macAddress.length() - 6);
   apSSID = "NTP_Clock_" + macSuffix;
   
-  // Load WiFi credentials from Preferences (may have been set by Improv WiFi)
-  preferences.begin("wifi_config", false);
-  String savedSSID = preferences.getString("ssid", "");
-  String savedPassword = preferences.getString("password", "");
-  preferences.end();
-  
-  if (savedSSID.length() > 0) {
-    // If WiFi.begin() was already called by Improv WiFi, this will continue the connection
-    if (WiFi.status() != WL_CONNECTED) {
+  // Check if Improv WiFi already connected us
+  if (WiFi.status() == WL_CONNECTED) {
+    // Improv WiFi successfully provisioned - skip saved credentials
+    beepBlocking(2000, 100);
+    
+    // Try to auto-detect timezone from IP geolocation if not already configured
+    preferences.begin("ntp_clock", false);
+    long savedTimezone = preferences.getLong("timezone", 0);
+    preferences.end();
+    
+    // Only auto-detect if timezone hasn't been manually configured (default is 0)
+    if (savedTimezone == 0) {
+      detectTimezoneFromIP();
+      // Reload preferences after detection
+      preferences.begin("ntp_clock", false);
+      gmtOffset_sec = preferences.getLong("timezone", -28800);
+      daylightOffset_sec = preferences.getInt("dst_offset", 0);
+      preferences.end();
+    }
+  } else {
+    // Load WiFi credentials from Preferences (fallback if Improv WiFi didn't connect)
+    preferences.begin("wifi_config", false);
+    String savedSSID = preferences.getString("ssid", "");
+    String savedPassword = preferences.getString("password", "");
+    preferences.end();
+    
+    if (savedSSID.length() > 0) {
       WiFi.mode(WIFI_STA);
       WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
-    }
-  
-    int wifiAttempts = 0;
-    while (WiFi.status() != WL_CONNECTED && wifiAttempts < 30) {
-      delay(500);
-      wifiAttempts++;
-    }
-  
-    if (WiFi.status() == WL_CONNECTED) {
-      beepBlocking(2000, 100);
-      
-      // Try to auto-detect timezone from IP geolocation if not already configured
-      preferences.begin("ntp_clock", false);
-      long savedTimezone = preferences.getLong("timezone", 0);
-      preferences.end();
-      
-      // Only auto-detect if timezone hasn't been manually configured (default is 0)
-      if (savedTimezone == 0) {
-        detectTimezoneFromIP();
-        // Reload preferences after detection
+    
+      int wifiAttempts = 0;
+      while (WiFi.status() != WL_CONNECTED && wifiAttempts < 30) {
+        delay(500);
+        improvSerial.handleSerial(); // Continue processing Improv WiFi during wait
+        wifiAttempts++;
+      }
+    
+      if (WiFi.status() == WL_CONNECTED) {
+        beepBlocking(2000, 100);
+        
+        // Try to auto-detect timezone from IP geolocation if not already configured
         preferences.begin("ntp_clock", false);
-        gmtOffset_sec = preferences.getLong("timezone", -28800);
-        daylightOffset_sec = preferences.getInt("dst_offset", 0);
+        long savedTimezone = preferences.getLong("timezone", 0);
         preferences.end();
+        
+        // Only auto-detect if timezone hasn't been manually configured (default is 0)
+        if (savedTimezone == 0) {
+          detectTimezoneFromIP();
+          // Reload preferences after detection
+          preferences.begin("ntp_clock", false);
+          gmtOffset_sec = preferences.getLong("timezone", -28800);
+          daylightOffset_sec = preferences.getInt("dst_offset", 0);
+          preferences.end();
+        }
       }
     }
   }
@@ -269,6 +320,14 @@ void setup() {
 void loop() {
   // Process Improv WiFi commands continuously
   improvSerial.handleSerial();
+  
+  // TEMPORARY DEBUG: Print a dot every second to verify Serial is working
+  static unsigned long lastDotTime = 0;
+  if (millis() - lastDotTime >= 1000) {
+    Serial.print(".");
+    Serial.flush();
+    lastDotTime = millis();
+  }
   if (showingVersion) {
     if (millis() - versionStartTime >= 5000) {
       showingVersion = false;
