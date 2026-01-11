@@ -114,11 +114,12 @@ void onImprovConnected(const char* ssid, const char* password) {
 }
 
 void setup() {
-  delay(500); // Minimal delay for hardware stabilization
+  delay(100); // Minimal delay for hardware stabilization
   
   // Init Serial for Improv WiFi protocol FIRST - must be ready immediately
   Serial.begin(115200);
-  delay(500);
+  Serial.flush(); // Clear any buffered data
+  delay(100); // Brief delay for Serial to stabilize
   
   // Setup Improv WiFi IMMEDIATELY - this must be ready before any WiFi operations
   improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_S3, "NTP Clock", FIRMWARE_VERSION, "NTP Clock");
@@ -126,12 +127,12 @@ void setup() {
   
   // Give Improv WiFi a generous grace period to receive commands from ESP Web Tools
   // ESP Web Tools needs time to detect device, establish Serial, and send Improv commands
-  // 10 seconds gives plenty of time without impacting user experience (device is just booting anyway)
+  // 15 seconds gives plenty of time for ESP Web Tools to detect and provision
   // IMPORTANT: Do NOT perform any WiFi operations during this period as they interfere with Improv WiFi
-  unsigned long improvGracePeriod = millis() + 10000; // 10 second grace period
+  unsigned long improvGracePeriod = millis() + 15000; // 15 second grace period
   while (millis() < improvGracePeriod) {
     improvSerial.handleSerial(); // Process Improv WiFi commands continuously
-    delay(5); // Small delay to avoid tight loop, but keep responsive
+    delay(1); // Minimal delay to avoid tight loop, keep very responsive
   }
   
   // Init Pins
