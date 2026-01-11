@@ -154,40 +154,19 @@
             This firmware includes Improv WiFi support. After installation completes, ESP Web Tools will automatically detect this and show a WiFi provisioning interface. You'll be able to enter your WiFi credentials directly in that interface.
         </div>
         
-        <div class="section">
-            <div class="section-title">Timezone Configuration</div>
-            <div class="form-group">
-                <label for="timezone">Timezone *</label>
-                <select id="timezone" required>
-                    <option value="-28800">Pacific Time (PT) - UTC-8 (PST/PDT with DST)</option>
-                    <option value="-21600">Mountain Time (MT) - UTC-7 (MST/MDT with DST)</option>
-                    <option value="-18000">Central Time (CT) - UTC-6 (CST/CDT with DST)</option>
-                    <option value="-14400">Eastern Time (ET) - UTC-5 (EST/EDT with DST)</option>
-                    <option value="0">UTC (Coordinated Universal Time)</option>
-                    <option value="3600">Central European Time (CET) - UTC+1</option>
-                    <option value="7200">Central European Summer Time (CEST) - UTC+2</option>
-                    <option value="28800">China Standard Time (CST) - UTC+8</option>
-                    <option value="32400">Japan Standard Time (JST) - UTC+9</option>
-                    <option value="36000">Australian Eastern Standard Time (AEST) - UTC+10</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="daylight-offset">Daylight Saving Offset (seconds)</label>
-                <input type="text" id="daylight-offset" value="0" placeholder="0">
-                <small style="color: #666; font-size: 0.85em; display: block; margin-top: 5px;">
-                    Usually 0 (DST handled automatically) or 3600 (1 hour) for manual DST
-                </small>
-            </div>
-        </div>
-        
         <div class="info-box">
             <strong>Installation Steps:</strong><br>
             1. Connect your ESP32-S3 board via USB<br>
-            2. Select your timezone above<br>
-            3. Click the install button below<br>
-            4. Select your ESP32 device when prompted<br>
-            5. After installation, ESP Web Tools will show WiFi provisioning - enter your WiFi credentials<br>
-            6. Timezone will be sent automatically after WiFi is configured
+            2. Click the install button below<br>
+            3. Select your ESP32 device when prompted<br>
+            4. After installation, ESP Web Tools will automatically detect Improv WiFi support<br>
+            5. A WiFi provisioning UI will appear - enter your WiFi credentials there<br>
+            6. After WiFi connects, configure timezone via the device's web interface at its IP address
+        </div>
+        
+        <div class="info-box" style="margin-top: 15px; background: #e7f3ff; border-left-color: #2196F3;">
+            <strong>ℹ️ About Timezone Configuration:</strong><br>
+            Improv WiFi handles WiFi credentials automatically. After your device connects to WiFi, you can configure the timezone by visiting the device's IP address in your browser. The device will display its IP address on the screen after connecting.
         </div>
         
         <div class="install-button-container">
@@ -202,11 +181,7 @@
     
     <script>
         const installButton = document.getElementById('install-button');
-        const timezoneSelect = document.getElementById('timezone');
-        const daylightOffsetInput = document.getElementById('daylight-offset');
         const statusMessage = document.getElementById('status-message');
-        
-        let serialPort = null;
         
         function showStatus(message, isError = false) {
             statusMessage.textContent = message;
@@ -214,98 +189,9 @@
             statusMessage.style.display = 'block';
         }
         
-        async function sendTimezoneConfig() {
-            const timezone = parseInt(timezoneSelect.value);
-            const daylightOffset = parseInt(daylightOffsetInput.value) || 0;
-            
-            try {
-                // Get serial port access
-                if (!navigator.serial) {
-                    showStatus('Web Serial API not available. Timezone can be configured via AP mode.', false);
-                    return;
-                }
-                
-                // Wait a bit for device to be ready after Improv WiFi
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                
-                // Try to get existing port or request new one
-                const ports = await navigator.serial.getPorts();
-                if (ports.length > 0) {
-                    serialPort = ports[0];
-                    try {
-                        await serialPort.open({ baudRate: 115200 });
-                    } catch (e) {
-                        // Port might already be open, try to request a new one
-                        serialPort = await navigator.serial.requestPort();
-                        await serialPort.open({ baudRate: 115200 });
-                    }
-                } else {
-                    serialPort = await navigator.serial.requestPort();
-                    await serialPort.open({ baudRate: 115200 });
-                }
-                
-                // Wait a bit for Serial to be ready
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-                // Send timezone configuration command
-                const configCmd = `CONFIG:TZ=${timezone}:DST=${daylightOffset}\n`;
-                const writer = serialPort.writable.getWriter();
-                await writer.write(new TextEncoder().encode(configCmd));
-                writer.releaseLock();
-                
-                // Wait for acknowledgment
-                const reader = serialPort.readable.getReader();
-                const decoder = new TextDecoder();
-                let ackReceived = false;
-                const timeout = setTimeout(() => {
-                    reader.cancel();
-                }, 3000);
-                
-                try {
-                    while (true) {
-                        const { value, done } = await reader.read();
-                        if (done) break;
-                        const text = decoder.decode(value);
-                        if (text.includes('OK:CONFIG_SAVED')) {
-                            ackReceived = true;
-                            break;
-                        }
-                    }
-                } catch (e) {
-                    // Reader was cancelled
-                } finally {
-                    reader.releaseLock();
-                    clearTimeout(timeout);
-                }
-                
-                if (ackReceived) {
-                    showStatus('Timezone configuration sent successfully!', false);
-                } else {
-                    showStatus('Timezone sent but no acknowledgment received. Device may still save it.', false);
-                }
-                
-                // Close port
-                try {
-                    await serialPort.close();
-                } catch (e) {
-                    // Port might already be closed
-                }
-            } catch (error) {
-                console.error('Error sending timezone:', error);
-                showStatus('Could not send timezone automatically. Configure via AP mode at 192.168.4.1', false);
-            }
-        }
-        
         // ESP Web Tools will automatically detect Improv WiFi support and show provisioning UI
-        // After WiFi is configured, send timezone
         installButton.addEventListener('esp-web-install-button-install-success', async () => {
             showStatus('Installation complete! ESP Web Tools will now show the Improv WiFi provisioning interface.', false);
-            
-            // Wait for Improv WiFi provisioning to complete, then send timezone
-            // Note: This is a best-effort attempt. User can also configure via AP mode.
-            setTimeout(() => {
-                sendTimezoneConfig();
-            }, 5000); // Wait 5 seconds for Improv WiFi to complete
         });
         
         // Handle manifest loading errors
