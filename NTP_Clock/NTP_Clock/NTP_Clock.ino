@@ -142,6 +142,7 @@ int displayBrightness = 8; // 0-15, default medium
 bool use24Hour = true; // 24-hour format (true) or 12-hour format (false)
 bool showIPAddress = false; // Flag to show IP address twice after WiFi connects
 int ipDisplayCount = 0; // Count how many times IP has been displayed
+bool resetIPScrolling = false; // Flag to force reset IP scrolling state when transitioning from AP mode
 bool showingVersion = true; // Guard flag to prevent loop() from overwriting version display
 unsigned long versionStartTime = 0; // When version display started
 bool showConnAfterVersion = false; // Flag to show "Conn" after version display
@@ -538,6 +539,9 @@ void loop() {
       delay(100);
       beepBlocking(3000, 100);
       
+      // Set flag to reset IP scrolling state
+      resetIPScrolling = true;
+      
       // Continue to normal WiFi mode handling below
     } else {
       // Still in AP mode - handle AP mode display
@@ -563,6 +567,16 @@ void loop() {
     if (showIPAddress && wifiConnected) {
       static bool ipScrollingStarted = false;
       static unsigned long ipStartTime = 0;
+      
+      // Reset scrolling state if flag is set (e.g., after transitioning from AP mode)
+      if (resetIPScrolling) {
+        ipScrollingStarted = false;
+        ipStartTime = 0;
+        ipDisplayCount = 0;
+        resetIPScrolling = false;
+        display.clear();
+        delay(100);
+      }
       
       if (!ipScrollingStarted) {
         IPAddress ip = WiFi.localIP();
