@@ -125,15 +125,32 @@ void setup() {
   improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_S3, "NTP Clock", FIRMWARE_VERSION, "NTP Clock");
   improvSerial.onImprovConnected(onImprovConnected);
   
+  // TEMPORARY DEBUG: Enable Serial output to verify Improv WiFi is working
+  Serial.println("Improv WiFi initialized");
+  Serial.flush();
+  
   // Give Improv WiFi a generous grace period to receive commands from ESP Web Tools
   // ESP Web Tools needs time to detect device, establish Serial, and send Improv commands
   // 15 seconds gives plenty of time for ESP Web Tools to detect and provision
   // IMPORTANT: Do NOT perform any WiFi operations during this period as they interfere with Improv WiFi
   unsigned long improvGracePeriod = millis() + 15000; // 15 second grace period
+  unsigned long lastDebugPrint = 0;
   while (millis() < improvGracePeriod) {
     improvSerial.handleSerial(); // Process Improv WiFi commands continuously
+    
+    // TEMPORARY DEBUG: Print every second to verify we're in the loop
+    if (millis() - lastDebugPrint >= 1000) {
+      Serial.print("Improv WiFi waiting... ");
+      Serial.println(millis());
+      Serial.flush();
+      lastDebugPrint = millis();
+    }
+    
     delay(1); // Minimal delay to avoid tight loop, keep very responsive
   }
+  
+  Serial.println("Improv WiFi grace period ended");
+  Serial.flush();
   
   // Init Pins
   pinMode(PIN_BUZZER, OUTPUT);
@@ -298,6 +315,12 @@ void setup() {
  
 void loop() {
   // Process Improv WiFi commands continuously
+  // TEMPORARY DEBUG: Check if Serial has data
+  if (Serial.available() > 0) {
+    Serial.print("Serial data available: ");
+    Serial.println(Serial.available());
+    Serial.flush();
+  }
   improvSerial.handleSerial();
   if (showingVersion) {
     if (millis() - versionStartTime >= 5000) {
