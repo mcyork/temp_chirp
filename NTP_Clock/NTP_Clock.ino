@@ -98,6 +98,51 @@ void onImprovConnected(const char* ssid, const char* password) {
   preferences.putString("ssid", ssid);
   preferences.putString("password", password);
   preferences.end();
+  
+  // After Improv WiFi connects, listen for timezone configuration via Serial
+  // Format: CONFIG:TZ=-28800:DST=0
+  // This allows the web installer to send timezone after WiFi is configured
+  unsigned long configStart = millis();
+  String configCmd = "";
+  while (millis() - configStart < 5000) { // Listen for 5 seconds after WiFi connects
+    if (Serial.available()) {
+      configCmd = Serial.readStringUntil('\n');
+      configCmd.trim();
+      if (configCmd.startsWith("CONFIG:")) {
+        configCmd = configCmd.substring(7); // Remove "CONFIG:"
+        long timezone = -28800;
+        int dstOffset = 0;
+        
+        int startPos = 0;
+        while (startPos < configCmd.length()) {
+          int eqPos = configCmd.indexOf('=', startPos);
+          int colonPos = configCmd.indexOf(':', startPos);
+          if (colonPos == -1) colonPos = configCmd.length();
+          
+          String key = configCmd.substring(startPos, eqPos);
+          String value = configCmd.substring(eqPos + 1, colonPos);
+          
+          if (key == "TZ") timezone = value.toInt();
+          else if (key == "DST") dstOffset = value.toInt();
+          
+          startPos = colonPos + 1;
+        }
+        
+        // Save timezone configuration
+        preferences.begin("ntp_clock", false);
+        preferences.putLong("timezone", timezone);
+        preferences.putInt("dst_offset", dstOffset);
+        preferences.end();
+        
+        // Send acknowledgment
+        Serial.println("OK:CONFIG_SAVED");
+        Serial.flush();
+        break;
+      }
+      configCmd = "";
+    }
+    delay(10);
+  }
 }
 
 void setup() {
