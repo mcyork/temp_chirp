@@ -37,8 +37,9 @@ jobs:
       - name: Install required libraries
         run: |
           # WiFi, SPI, Preferences, and WebServer are built into ESP32 core
-          # No additional libraries needed
-          echo "Using built-in ESP32 libraries"
+          # Install ImprovWiFiLibrary for WiFi provisioning (from GitHub)
+          cd ~/Arduino/libraries
+          git clone https://github.com/jnthas/Improv-WiFi-Library.git ImprovWiFiLibrary
           
       - name: Compile firmware
         run: |

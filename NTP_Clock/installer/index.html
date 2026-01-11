@@ -214,83 +214,10 @@
         const daylightOffsetInput = document.getElementById('daylight-offset');
         const statusMessage = document.getElementById('status-message');
         
-        let serialPort = null;
-        let reader = null;
-        
         function showStatus(message, isError = false) {
             statusMessage.textContent = message;
             statusMessage.className = 'status-message ' + (isError ? 'error' : 'success');
             statusMessage.style.display = 'block';
-        }
-        
-        async function sendConfiguration() {
-            const ssid = wifiSsidInput.value.trim();
-            const password = wifiPasswordInput.value.trim();
-            const timezone = parseInt(timezoneSelect.value);
-            const daylightOffset = parseInt(daylightOffsetInput.value) || 0;
-            
-            if (!ssid || !password) {
-                showStatus('Please enter WiFi SSID and password', true);
-                return false;
-            }
-            
-            try {
-                // Get the serial port from the install button (ESP Web Tools keeps it open)
-                // Access the internal port if available
-                if (installButton.port) {
-                    serialPort = installButton.port;
-                } else {
-                    // Try to request serial port access
-                    serialPort = await navigator.serial.requestPort();
-                    await serialPort.open({ baudRate: 115200 });
-                }
-                
-                // Wait a bit for device Serial to be ready (already waited 3s before opening port)
-                await new Promise(resolve => setTimeout(resolve, 500));
-                
-                // Send configuration command
-                const configCmd = `CONFIG:SSID=${ssid}:PASSWORD=${password}:TZ=${timezone}:DST=${daylightOffset}\n`;
-                const writer = serialPort.writable.getWriter();
-                await writer.write(new TextEncoder().encode(configCmd));
-                writer.releaseLock();
-                
-                // Wait for acknowledgment
-                reader = serialPort.readable.getReader();
-                const decoder = new TextDecoder();
-                let ackReceived = false;
-                const timeout = setTimeout(() => {
-                    reader.cancel();
-                }, 3000);
-                
-                try {
-                    while (true) {
-                        const { value, done } = await reader.read();
-                        if (done) break;
-                        const text = decoder.decode(value);
-                        if (text.includes('OK:CONFIG_SAVED')) {
-                            ackReceived = true;
-                            break;
-                        }
-                    }
-                } catch (e) {
-                    // Reader was cancelled
-                } finally {
-                    reader.releaseLock();
-                    clearTimeout(timeout);
-                }
-                
-                if (ackReceived) {
-                    showStatus('Configuration sent successfully!');
-                    return true;
-                } else {
-                    showStatus('Configuration sent but no acknowledgment received. Device may still be configuring...', false);
-                    return true; // Assume success
-                }
-            } catch (error) {
-                console.error('Error sending configuration:', error);
-                showStatus('Could not send configuration via Serial. Please configure via AP mode at 192.168.4.1', true);
-                return false;
-            }
         }
         
         // Intercept the install button click to validate inputs
@@ -305,48 +232,16 @@
             }
         });
         
-        // Send configuration after successful install
+        // ESP Web Tools will automatically use Improv WiFi if firmware supports it
+        // After installation, Improv WiFi provisioning will happen automatically
         installButton.addEventListener('esp-web-install-button-install-success', async () => {
-            showStatus('Installation complete! Sending configuration...');
+            const ssid = wifiSsidInput.value.trim();
+            const password = wifiPasswordInput.value.trim();
             
-            // Wait for device to reboot and Serial to be ready (device reboots, then Serial.begin() takes time)
-            await new Promise(resolve => setTimeout(resolve, 3000));
-            
-            try {
-                // Try to get the serial port - ESP Web Tools may have closed it
-                if (!navigator.serial) {
-                    showStatus('Web Serial API not available. Please configure via AP mode at 192.168.4.1', true);
-                    return;
-                }
-                
-                // Try to reuse existing port or request new one
-                const ports = await navigator.serial.getPorts();
-                if (ports.length > 0) {
-                    serialPort = ports[0];
-                    try {
-                        await serialPort.open({ baudRate: 115200 });
-                    } catch (e) {
-                        // Port might already be open, try to request a new one
-                        serialPort = await navigator.serial.requestPort();
-                        await serialPort.open({ baudRate: 115200 });
-                    }
-                } else {
-                    // Request new port access
-                    serialPort = await navigator.serial.requestPort();
-                    await serialPort.open({ baudRate: 115200 });
-                }
-                
-                await sendConfiguration();
-                
-                // Close port after sending
-                try {
-                    await serialPort.close();
-                } catch (e) {
-                    // Port might already be closed
-                }
-            } catch (error) {
-                console.error('Error accessing serial port:', error);
-                showStatus('Could not send configuration automatically. Please configure via AP mode at 192.168.4.1', true);
+            if (ssid && password) {
+                showStatus('Installation complete! WiFi configuration will be sent via Improv WiFi protocol.');
+            } else {
+                showStatus('Installation complete! Please configure WiFi via AP mode at 192.168.4.1', false);
             }
         });
         

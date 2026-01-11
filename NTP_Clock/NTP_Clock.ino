@@ -20,6 +20,7 @@
 #include <SPI.h>
 #include <Preferences.h>
 #include <string.h>
+#include <ImprovWiFiLibrary.h>
 #include "SevenSegmentDisplay/MAX7219Display.h"
 #include "SevenSegmentDisplay/MAX7219Display.cpp"
 #include "web_pages.h"
@@ -50,10 +51,11 @@ const int PIN_CS_DISP  = 11;
  // --- DISPLAY LIBRARY ---
  // Display driver is now in SevenSegmentDisplay library
  
- // --- OBJECTS ---
- MAX7219Display display(PIN_CS_DISP);
- Preferences preferences;
- WebServer server(80);
+// --- OBJECTS ---
+MAX7219Display display(PIN_CS_DISP);
+Preferences preferences;
+WebServer server(80);
+ImprovWiFi improvSerial(&Serial);
  
 // --- STATE VARIABLES ---
 bool wifiConnected = false;
@@ -89,81 +91,25 @@ void startBeep(int frequency, int duration);
 void updateBeep();
 void beepBlocking(int frequency, int duration);
  
+// Improv WiFi callback - called when WiFi connection is successful
+void onImprovConnected(const char* ssid, const char* password) {
+  // Save WiFi credentials
+  preferences.begin("wifi_config", false);
+  preferences.putString("ssid", ssid);
+  preferences.putString("password", password);
+  preferences.end();
+}
+
 void setup() {
   delay(2000);
   
-  // Init Serial for configuration commands from web installer
+  // Init Serial for Improv WiFi protocol
   Serial.begin(115200);
-  delay(1000);  // Give Serial time to stabilize after reboot
+  delay(500);
   
-  // Check for configuration commands from web installer (sent via Serial)
-  // Format: CONFIG:SSID=xxx:PASSWORD=yyy:TZ=-28800:DST=0
-  // Wait up to 8 seconds for configuration (device reboots after install, then installer needs time)
-  String configCmd = "";
-  bool configReceived = false;
-  unsigned long configStart = millis();
-  while (millis() - configStart < 8000 && !configReceived) {
-    if (Serial.available()) {
-      // Read available bytes and accumulate
-      while (Serial.available() > 0 && !configReceived) {
-        char c = Serial.read();
-        if (c == '\n' || c == '\r') {
-          configCmd.trim();
-          if (configCmd.startsWith("CONFIG:")) {
-            // Parse configuration
-            configCmd = configCmd.substring(7); // Remove "CONFIG:"
-            String ssid = "";
-            String password = "";
-            long timezone = -28800;
-            int dstOffset = 0;
-            
-            int startPos = 0;
-            while (startPos < configCmd.length()) {
-              int eqPos = configCmd.indexOf('=', startPos);
-              int colonPos = configCmd.indexOf(':', startPos);
-              if (colonPos == -1) colonPos = configCmd.length();
-              
-              String key = configCmd.substring(startPos, eqPos);
-              String value = configCmd.substring(eqPos + 1, colonPos);
-              
-              if (key == "SSID") ssid = value;
-              else if (key == "PASSWORD") password = value;
-              else if (key == "TZ") timezone = value.toInt();
-              else if (key == "DST") dstOffset = value.toInt();
-              
-              startPos = colonPos + 1;
-            }
-            
-            // Save configuration
-            if (ssid.length() > 0) {
-              preferences.begin("wifi_config", false);
-              preferences.putString("ssid", ssid);
-              preferences.putString("password", password);
-              preferences.end();
-              
-              preferences.begin("ntp_clock", false);
-              preferences.putLong("timezone", timezone);
-              preferences.putInt("dst_offset", dstOffset);
-              preferences.end();
-              
-              // Send acknowledgment and flush
-              Serial.println("OK:CONFIG_SAVED");
-              Serial.flush();
-              
-              // Small delay to ensure acknowledgment is sent
-              delay(100);
-              
-              configReceived = true;
-            }
-          }
-          configCmd = ""; // Reset for next line
-        } else if (c >= 32) {  // Only add printable characters
-          configCmd += c;
-        }
-      }
-    }
-    delay(50);  // Check every 50ms
-  }
+  // Setup Improv WiFi
+  improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_S3, "NTP Clock", FIRMWARE_VERSION, "NTP Clock");
+  improvSerial.onImprovConnected(onImprovConnected);
   
   // Init Pins
   pinMode(PIN_BUZZER, OUTPUT);
@@ -182,15 +128,18 @@ void setup() {
   String macSuffix = macAddress.substring(macAddress.length() - 6);
   apSSID = "NTP_Clock_" + macSuffix;
   
-  // Load WiFi credentials from Preferences
+  // Load WiFi credentials from Preferences (may have been set by Improv WiFi)
   preferences.begin("wifi_config", false);
   String savedSSID = preferences.getString("ssid", "");
   String savedPassword = preferences.getString("password", "");
   preferences.end();
   
   if (savedSSID.length() > 0) {
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
+    // If WiFi.begin() was already called by Improv WiFi, this will continue the connection
+    if (WiFi.status() != WL_CONNECTED) {
+      WiFi.mode(WIFI_STA);
+      WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
+    }
   
     int wifiAttempts = 0;
     while (WiFi.status() != WL_CONNECTED && wifiAttempts < 30) {
@@ -290,6 +239,8 @@ void setup() {
  }
  
 void loop() {
+  // Process Improv WiFi commands continuously
+  improvSerial.handleSerial();
   if (showingVersion) {
     if (millis() - versionStartTime >= 5000) {
       showingVersion = false;
