@@ -16,6 +16,8 @@
 
 #include <WiFi.h>
 #include <WebServer.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
 #include <time.h>
 #include <SPI.h>
 #include <Preferences.h>
@@ -90,6 +92,7 @@ void handleFactoryReset();
 void startBeep(int frequency, int duration);
 void updateBeep();
 void beepBlocking(int frequency, int duration);
+bool detectTimezoneFromIP();
  
 // Improv WiFi callback - called when WiFi connection is successful
 void onImprovConnected(const char* ssid, const char* password) {
@@ -98,6 +101,16 @@ void onImprovConnected(const char* ssid, const char* password) {
   preferences.putString("ssid", ssid);
   preferences.putString("password", password);
   preferences.end();
+  
+  // Try to auto-detect timezone from IP geolocation if not already configured
+  preferences.begin("ntp_clock", false);
+  long savedTimezone = preferences.getLong("timezone", 0);
+  preferences.end();
+  
+  // Only auto-detect if timezone hasn't been manually configured (default is 0)
+  if (savedTimezone == 0) {
+    detectTimezoneFromIP();
+  }
 }
 
 void setup() {
@@ -149,6 +162,21 @@ void setup() {
   
     if (WiFi.status() == WL_CONNECTED) {
       beepBlocking(2000, 100);
+      
+      // Try to auto-detect timezone from IP geolocation if not already configured
+      preferences.begin("ntp_clock", false);
+      long savedTimezone = preferences.getLong("timezone", 0);
+      preferences.end();
+      
+      // Only auto-detect if timezone hasn't been manually configured (default is 0)
+      if (savedTimezone == 0) {
+        detectTimezoneFromIP();
+        // Reload preferences after detection
+        preferences.begin("ntp_clock", false);
+        gmtOffset_sec = preferences.getLong("timezone", -28800);
+        daylightOffset_sec = preferences.getInt("dst_offset", 0);
+        preferences.end();
+      }
     }
   }
   
@@ -453,6 +481,43 @@ void beepBlocking(int frequency, int duration) {
   delay(duration);
   ledcWrite(PIN_BUZZER, 0);
   ledcDetach(PIN_BUZZER);
+}
+
+bool detectTimezoneFromIP() {
+  HTTPClient http;
+  http.begin("http://ip-api.com/json/?fields=status,offset");
+  http.setTimeout(5000);
+  
+  int httpCode = http.GET();
+  
+  if (httpCode == HTTP_CODE_OK) {
+    String payload = http.getString();
+    
+    // Parse JSON response
+    // Expected format: {"status":"success","offset":-28800}
+    DynamicJsonDocument doc(512);
+    DeserializationError error = deserializeJson(doc, payload);
+    
+    if (!error && doc["status"] == "success" && doc.containsKey("offset")) {
+      long offset = doc["offset"].as<long>();
+      
+      // Save detected timezone
+      preferences.begin("ntp_clock", false);
+      preferences.putLong("timezone", offset);
+      preferences.putInt("dst_offset", 0); // DST handled automatically via offset
+      preferences.end();
+      
+      // Update global variables
+      gmtOffset_sec = offset;
+      daylightOffset_sec = 0;
+      
+      http.end();
+      return true;
+    }
+  }
+  
+  http.end();
+  return false;
 }
 
  

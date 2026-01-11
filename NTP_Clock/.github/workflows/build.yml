@@ -42,6 +42,8 @@ jobs:
           mkdir -p ~/.arduino15/libraries
           cd ~/.arduino15/libraries
           git clone https://github.com/jnthas/Improv-WiFi-Library.git ImprovWiFiLibrary
+          # Install ArduinoJson for timezone detection
+          arduino-cli lib install "ArduinoJson"
           
       - name: Compile firmware
         run: |
