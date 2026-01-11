@@ -114,9 +114,9 @@ void onImprovConnected(const char* ssid, const char* password) {
 }
 
 void setup() {
-  delay(2000);
+  delay(500); // Minimal delay for hardware stabilization
   
-  // Init Serial for Improv WiFi protocol FIRST
+  // Init Serial for Improv WiFi protocol FIRST - must be ready immediately
   Serial.begin(115200);
   delay(500);
   
@@ -127,6 +127,7 @@ void setup() {
   // Give Improv WiFi a generous grace period to receive commands from ESP Web Tools
   // ESP Web Tools needs time to detect device, establish Serial, and send Improv commands
   // 10 seconds gives plenty of time without impacting user experience (device is just booting anyway)
+  // IMPORTANT: Do NOT perform any WiFi operations during this period as they interfere with Improv WiFi
   unsigned long improvGracePeriod = millis() + 10000; // 10 second grace period
   while (millis() < improvGracePeriod) {
     improvSerial.handleSerial(); // Process Improv WiFi commands continuously
@@ -143,7 +144,7 @@ void setup() {
   pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
   digitalWrite(PIN_BUZZER, LOW);
   
-  // Generate unique AP SSID using MAC address
+  // Generate unique AP SSID using MAC address - MOVED HERE to avoid WiFi operations during Improv grace period
   WiFi.mode(WIFI_STA);
   String macAddress = WiFi.macAddress();
   macAddress.replace(":", "");
