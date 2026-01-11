@@ -38,6 +38,7 @@ jobs:
         run: |
           # WiFi, SPI, Preferences, and WebServer are built into ESP32 core
           # Install ImprovWiFiLibrary for WiFi provisioning (from GitHub)
+          mkdir -p ~/Arduino/libraries
           cd ~/Arduino/libraries
           git clone https://github.com/jnthas/Improv-WiFi-Library.git ImprovWiFiLibrary
           
