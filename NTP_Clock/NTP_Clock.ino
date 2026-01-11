@@ -116,13 +116,22 @@ void onImprovConnected(const char* ssid, const char* password) {
 void setup() {
   delay(2000);
   
-  // Init Serial for Improv WiFi protocol
+  // Init Serial for Improv WiFi protocol FIRST
   Serial.begin(115200);
   delay(500);
   
-  // Setup Improv WiFi
+  // Setup Improv WiFi IMMEDIATELY - this must be ready before any WiFi operations
   improvSerial.setDeviceInfo(ImprovTypes::ChipFamily::CF_ESP32_S3, "NTP Clock", FIRMWARE_VERSION, "NTP Clock");
   improvSerial.onImprovConnected(onImprovConnected);
+  
+  // Give Improv WiFi a generous grace period to receive commands from ESP Web Tools
+  // ESP Web Tools needs time to detect device, establish Serial, and send Improv commands
+  // 10 seconds gives plenty of time without impacting user experience (device is just booting anyway)
+  unsigned long improvGracePeriod = millis() + 10000; // 10 second grace period
+  while (millis() < improvGracePeriod) {
+    improvSerial.handleSerial(); // Process Improv WiFi commands continuously
+    delay(5); // Small delay to avoid tight loop, but keep responsive
+  }
   
   // Init Pins
   pinMode(PIN_BUZZER, OUTPUT);
@@ -141,41 +150,60 @@ void setup() {
   String macSuffix = macAddress.substring(macAddress.length() - 6);
   apSSID = "NTP_Clock_" + macSuffix;
   
-  // Load WiFi credentials from Preferences (may have been set by Improv WiFi)
-  preferences.begin("wifi_config", false);
-  String savedSSID = preferences.getString("ssid", "");
-  String savedPassword = preferences.getString("password", "");
-  preferences.end();
-  
-  if (savedSSID.length() > 0) {
-    // If WiFi.begin() was already called by Improv WiFi, this will continue the connection
-    if (WiFi.status() != WL_CONNECTED) {
+  // Check if Improv WiFi already connected us
+  if (WiFi.status() == WL_CONNECTED) {
+    // Improv WiFi successfully provisioned - skip saved credentials
+    beepBlocking(2000, 100);
+    
+    // Try to auto-detect timezone from IP geolocation if not already configured
+    preferences.begin("ntp_clock", false);
+    long savedTimezone = preferences.getLong("timezone", 0);
+    preferences.end();
+    
+    // Only auto-detect if timezone hasn't been manually configured (default is 0)
+    if (savedTimezone == 0) {
+      detectTimezoneFromIP();
+      // Reload preferences after detection
+      preferences.begin("ntp_clock", false);
+      gmtOffset_sec = preferences.getLong("timezone", -28800);
+      daylightOffset_sec = preferences.getInt("dst_offset", 0);
+      preferences.end();
+    }
+  } else {
+    // Load WiFi credentials from Preferences (fallback if Improv WiFi didn't connect)
+    preferences.begin("wifi_config", false);
+    String savedSSID = preferences.getString("ssid", "");
+    String savedPassword = preferences.getString("password", "");
+    preferences.end();
+    
+    if (savedSSID.length() > 0) {
       WiFi.mode(WIFI_STA);
       WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
-    }
-  
-    int wifiAttempts = 0;
-    while (WiFi.status() != WL_CONNECTED && wifiAttempts < 30) {
-      delay(500);
-      wifiAttempts++;
-    }
-  
-    if (WiFi.status() == WL_CONNECTED) {
-      beepBlocking(2000, 100);
-      
-      // Try to auto-detect timezone from IP geolocation if not already configured
-      preferences.begin("ntp_clock", false);
-      long savedTimezone = preferences.getLong("timezone", 0);
-      preferences.end();
-      
-      // Only auto-detect if timezone hasn't been manually configured (default is 0)
-      if (savedTimezone == 0) {
-        detectTimezoneFromIP();
-        // Reload preferences after detection
+    
+      int wifiAttempts = 0;
+      while (WiFi.status() != WL_CONNECTED && wifiAttempts < 30) {
+        delay(500);
+        improvSerial.handleSerial(); // Continue processing Improv WiFi during wait
+        wifiAttempts++;
+      }
+    
+      if (WiFi.status() == WL_CONNECTED) {
+        beepBlocking(2000, 100);
+        
+        // Try to auto-detect timezone from IP geolocation if not already configured
         preferences.begin("ntp_clock", false);
-        gmtOffset_sec = preferences.getLong("timezone", -28800);
-        daylightOffset_sec = preferences.getInt("dst_offset", 0);
+        long savedTimezone = preferences.getLong("timezone", 0);
         preferences.end();
+        
+        // Only auto-detect if timezone hasn't been manually configured (default is 0)
+        if (savedTimezone == 0) {
+          detectTimezoneFromIP();
+          // Reload preferences after detection
+          preferences.begin("ntp_clock", false);
+          gmtOffset_sec = preferences.getLong("timezone", -28800);
+          daylightOffset_sec = preferences.getInt("dst_offset", 0);
+          preferences.end();
+        }
       }
     }
   }
