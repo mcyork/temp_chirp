@@ -118,14 +118,24 @@
             margin-bottom: 5px;
         }
         
-        .ap-mode-info {
-            background: #e7f3ff;
-            border-left: 4px solid #2196F3;
-            padding: 15px;
+        .status-message {
+            margin-top: 15px;
+            padding: 10px;
             border-radius: 4px;
-            margin-top: 20px;
             font-size: 0.9em;
-            color: #1976D2;
+            display: none;
+        }
+        
+        .status-message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status-message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
         }
     </style>
 </head>
@@ -159,7 +169,7 @@
                     <option value="-28800">Pacific Time (PT) - UTC-8 (PST/PDT with DST)</option>
                     <option value="-21600">Mountain Time (MT) - UTC-7 (MST/MDT with DST)</option>
                     <option value="-18000">Central Time (CT) - UTC-6 (CST/CDT with DST)</option>
-                    <option value="-18000">Eastern Time (ET) - UTC-5 (EST/EDT with DST)</option>
+                    <option value="-14400">Eastern Time (ET) - UTC-5 (EST/EDT with DST)</option>
                     <option value="0">UTC (Coordinated Universal Time)</option>
                     <option value="3600">Central European Time (CET) - UTC+1</option>
                     <option value="7200">Central European Summer Time (CEST) - UTC+2</option>
@@ -170,9 +180,9 @@
             </div>
             <div class="form-group">
                 <label for="daylight-offset">Daylight Saving Offset (seconds)</label>
-                <input type="text" id="daylight-offset" value="3600" placeholder="3600">
+                <input type="text" id="daylight-offset" value="0" placeholder="0">
                 <small style="color: #666; font-size: 0.85em; display: block; margin-top: 5px;">
-                    Set to 3600 (1 hour) for US timezones with DST. The firmware will automatically apply this offset during daylight saving periods. Set to 0 if your timezone doesn't observe DST.
+                    Usually 0 (DST handled automatically) or 3600 (1 hour) for manual DST
                 </small>
             </div>
         </div>
@@ -183,13 +193,7 @@
             2. Fill in WiFi credentials and timezone above<br>
             3. Click the install button below<br>
             4. Select your ESP32 device when prompted<br>
-            5. Wait for installation to complete
-        </div>
-        
-        <div class="ap-mode-info">
-            <strong>Alternative: AP Mode Configuration</strong><br>
-            If you prefer not to use the web installer, you can flash firmware manually and configure via AP mode. 
-            The device will create a WiFi access point "NTP-Clock-AP" that you can connect to and configure at 192.168.4.1
+            5. Wait for installation to complete - credentials will be sent automatically
         </div>
         
         <div class="install-button-container">
@@ -198,6 +202,8 @@
                 manifest="manifest.json">
             </esp-web-install-button>
         </div>
+        
+        <div id="status-message" class="status-message"></div>
     </div>
     
     <script>
@@ -206,41 +212,148 @@
         const wifiPasswordInput = document.getElementById('wifi-password');
         const timezoneSelect = document.getElementById('timezone');
         const daylightOffsetInput = document.getElementById('daylight-offset');
+        const statusMessage = document.getElementById('status-message');
         
-        // Intercept the install button click to add configuration data
-        installButton.addEventListener('esp-web-install-button-click', (e) => {
+        let serialPort = null;
+        let reader = null;
+        
+        function showStatus(message, isError = false) {
+            statusMessage.textContent = message;
+            statusMessage.className = 'status-message ' + (isError ? 'error' : 'success');
+            statusMessage.style.display = 'block';
+        }
+        
+        async function sendConfiguration() {
             const ssid = wifiSsidInput.value.trim();
             const password = wifiPasswordInput.value.trim();
             const timezone = parseInt(timezoneSelect.value);
             const daylightOffset = parseInt(daylightOffsetInput.value) || 0;
             
             if (!ssid || !password) {
+                showStatus('Please enter WiFi SSID and password', true);
+                return false;
+            }
+            
+            try {
+                // Get the serial port from the install button (ESP Web Tools keeps it open)
+                // Access the internal port if available
+                if (installButton.port) {
+                    serialPort = installButton.port;
+                } else {
+                    // Try to request serial port access
+                    serialPort = await navigator.serial.requestPort();
+                    await serialPort.open({ baudRate: 115200 });
+                }
+                
+                // Wait a bit for device to be ready
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Send configuration command
+                const configCmd = `CONFIG:SSID=${ssid}:PASSWORD=${password}:TZ=${timezone}:DST=${daylightOffset}\n`;
+                const writer = serialPort.writable.getWriter();
+                await writer.write(new TextEncoder().encode(configCmd));
+                writer.releaseLock();
+                
+                // Wait for acknowledgment
+                reader = serialPort.readable.getReader();
+                const decoder = new TextDecoder();
+                let ackReceived = false;
+                const timeout = setTimeout(() => {
+                    reader.cancel();
+                }, 3000);
+                
+                try {
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        const text = decoder.decode(value);
+                        if (text.includes('OK:CONFIG_SAVED')) {
+                            ackReceived = true;
+                            break;
+                        }
+                    }
+                } catch (e) {
+                    // Reader was cancelled
+                } finally {
+                    reader.releaseLock();
+                    clearTimeout(timeout);
+                }
+                
+                if (ackReceived) {
+                    showStatus('Configuration sent successfully!');
+                    return true;
+                } else {
+                    showStatus('Configuration sent but no acknowledgment received. Device may still be configuring...', false);
+                    return true; // Assume success
+                }
+            } catch (error) {
+                console.error('Error sending configuration:', error);
+                showStatus('Could not send configuration via Serial. Please configure via AP mode at 192.168.4.1', true);
+                return false;
+            }
+        }
+        
+        // Intercept the install button click to validate inputs
+        installButton.addEventListener('esp-web-install-button-click', (e) => {
+            const ssid = wifiSsidInput.value.trim();
+            const password = wifiPasswordInput.value.trim();
+            
+            if (!ssid || !password) {
                 e.preventDefault();
                 alert('Please enter WiFi SSID and password');
                 return;
             }
-            
-            // Store configuration in sessionStorage for later use
-            // Note: ESP Web Tools doesn't directly support passing custom data,
-            // so we'll need to handle this in the firmware via a different method
-            // For now, we'll rely on AP mode for configuration after flash
-            sessionStorage.setItem('wifi_ssid', ssid);
-            sessionStorage.setItem('wifi_password', password);
-            sessionStorage.setItem('timezone_offset', timezone);
-            sessionStorage.setItem('daylight_offset', daylightOffset);
-            
-            console.log('Configuration saved:', { ssid, password, timezone, daylightOffset });
         });
         
-        // Show instructions after successful install
-        installButton.addEventListener('esp-web-install-button-install-success', () => {
-            alert('Installation successful! The device will now start in AP mode. Connect to "NTP-Clock-AP" and configure WiFi at 192.168.4.1');
+        // Send configuration after successful install
+        installButton.addEventListener('esp-web-install-button-install-success', async () => {
+            showStatus('Installation complete! Sending configuration...');
+            
+            // Wait for device to be ready after reboot
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            try {
+                // Try to get the serial port - ESP Web Tools may have closed it
+                if (!navigator.serial) {
+                    showStatus('Web Serial API not available. Please configure via AP mode at 192.168.4.1', true);
+                    return;
+                }
+                
+                // Try to reuse existing port or request new one
+                const ports = await navigator.serial.getPorts();
+                if (ports.length > 0) {
+                    serialPort = ports[0];
+                    try {
+                        await serialPort.open({ baudRate: 115200 });
+                    } catch (e) {
+                        // Port might already be open, try to request a new one
+                        serialPort = await navigator.serial.requestPort();
+                        await serialPort.open({ baudRate: 115200 });
+                    }
+                } else {
+                    // Request new port access
+                    serialPort = await navigator.serial.requestPort();
+                    await serialPort.open({ baudRate: 115200 });
+                }
+                
+                await sendConfiguration();
+                
+                // Close port after sending
+                try {
+                    await serialPort.close();
+                } catch (e) {
+                    // Port might already be closed
+                }
+            } catch (error) {
+                console.error('Error accessing serial port:', error);
+                showStatus('Could not send configuration automatically. Please configure via AP mode at 192.168.4.1', true);
+            }
         });
         
         // Handle manifest loading errors
         installButton.addEventListener('esp-web-install-button-manifest-error', (e) => {
             console.error('Manifest error:', e.detail);
-            alert('Failed to load firmware manifest. Please check:\n1. GitHub Pages is enabled\n2. The release exists at https://github.com/mcyork/ntp_clock/releases\n3. Your internet connection is working');
+            showStatus('Failed to load firmware manifest. Please check GitHub Pages and releases.', true);
         });
     </script>
 </body>

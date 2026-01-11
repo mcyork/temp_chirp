@@ -92,6 +92,65 @@ void beepBlocking(int frequency, int duration);
 void setup() {
   delay(2000);
   
+  // Init Serial for configuration commands from web installer
+  Serial.begin(115200);
+  delay(500);
+  
+  // Check for configuration commands from web installer (sent via Serial)
+  // Format: CONFIG:SSID=xxx:PASSWORD=yyy:TZ=-28800:DST=0
+  // Wait up to 3 seconds for configuration
+  String configCmd = "";
+  unsigned long configStart = millis();
+  while (millis() - configStart < 3000) {
+    if (Serial.available()) {
+      configCmd = Serial.readStringUntil('\n');
+      configCmd.trim();
+      if (configCmd.startsWith("CONFIG:")) {
+        // Parse configuration
+        configCmd = configCmd.substring(7); // Remove "CONFIG:"
+        String ssid = "";
+        String password = "";
+        long timezone = -28800;
+        int dstOffset = 0;
+        
+        int startPos = 0;
+        while (startPos < configCmd.length()) {
+          int eqPos = configCmd.indexOf('=', startPos);
+          int colonPos = configCmd.indexOf(':', startPos);
+          if (colonPos == -1) colonPos = configCmd.length();
+          
+          String key = configCmd.substring(startPos, eqPos);
+          String value = configCmd.substring(eqPos + 1, colonPos);
+          
+          if (key == "SSID") ssid = value;
+          else if (key == "PASSWORD") password = value;
+          else if (key == "TZ") timezone = value.toInt();
+          else if (key == "DST") dstOffset = value.toInt();
+          
+          startPos = colonPos + 1;
+        }
+        
+        // Save configuration
+        if (ssid.length() > 0) {
+          preferences.begin("wifi_config", false);
+          preferences.putString("ssid", ssid);
+          preferences.putString("password", password);
+          preferences.end();
+          
+          preferences.begin("ntp_clock", false);
+          preferences.putLong("timezone", timezone);
+          preferences.putInt("dst_offset", dstOffset);
+          preferences.end();
+          
+          // Send acknowledgment
+          Serial.println("OK:CONFIG_SAVED");
+        }
+        break;
+      }
+    }
+    delay(10);
+  }
+  
   // Init Pins
   pinMode(PIN_BUZZER, OUTPUT);
   pinMode(PIN_CS_DISP, OUTPUT);
@@ -361,7 +420,10 @@ void handleConfig() {
    
    preferences.begin("wifi_config", false);
    preferences.putString("ssid", ssid);
-   preferences.putString("password", password);
+   // Only update password if a new one was provided
+   if (password.length() > 0) {
+     preferences.putString("password", password);
+   }
    preferences.end();
    
    long timezoneOffset = timezoneStr.toInt();
