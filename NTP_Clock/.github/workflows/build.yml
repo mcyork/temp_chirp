@@ -60,7 +60,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add installer/firmware.bin
+          git add -f installer/firmware.bin
           git diff --staged --quiet || git commit -m "Build firmware for ${{ github.ref_name }}"
           git push origin main
           
