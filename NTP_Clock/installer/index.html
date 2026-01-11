@@ -245,8 +245,8 @@
                     await serialPort.open({ baudRate: 115200 });
                 }
                 
-                // Wait a bit for device to be ready
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                // Wait a bit for device Serial to be ready (already waited 3s before opening port)
+                await new Promise(resolve => setTimeout(resolve, 500));
                 
                 // Send configuration command
                 const configCmd = `CONFIG:SSID=${ssid}:PASSWORD=${password}:TZ=${timezone}:DST=${daylightOffset}\n`;
@@ -309,8 +309,8 @@
         installButton.addEventListener('esp-web-install-button-install-success', async () => {
             showStatus('Installation complete! Sending configuration...');
             
-            // Wait for device to be ready after reboot
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Wait for device to reboot and Serial to be ready (device reboots, then Serial.begin() takes time)
+            await new Promise(resolve => setTimeout(resolve, 3000));
             
             try {
                 // Try to get the serial port - ESP Web Tools may have closed it
